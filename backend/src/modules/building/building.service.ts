@@ -4,14 +4,14 @@ import { toNumberId } from "../../shared/utils/helpers";
 import type { CreateBuildingInput, UpdateBuildingInput } from "./building.validation";
 
 export class BuildingService {
-  async create(ownerId: string, input: CreateBuildingInput) {
+  async create(orgId: string, input: CreateBuildingInput) {
     return prisma.building.create({
-      data: { ...input, ownerId: toNumberId(ownerId) },
+      data: { ...input, orgId: toNumberId(orgId) },
     });
   }
 
-  async findAll(ownerId: string, query: { page: number; limit: number; search?: string }) {
-    const where: any = { ownerId: toNumberId(ownerId) };
+  async findAll(orgId: string, query: { page: number; limit: number; search?: string }) {
+    const where: any = { orgId: toNumberId(orgId) };
 
     if (query.search) {
       where.OR = [
@@ -45,9 +45,9 @@ export class BuildingService {
     };
   }
 
-  async findById(ownerId: string, id: string) {
+  async findById(orgId: string, id: string) {
     const building = await prisma.building.findFirst({
-      where: { id: toNumberId(id), ownerId: toNumberId(ownerId) },
+      where: { id: toNumberId(id), orgId: toNumberId(orgId) },
       include: {
         _count: { select: { floors: true } },
         floors: {
@@ -65,8 +65,8 @@ export class BuildingService {
     return { ...rest, totalFloors: _count.floors };
   }
 
-  async update(ownerId: string, id: string, input: UpdateBuildingInput) {
-    const existing = await prisma.building.findFirst({ where: { id: toNumberId(id), ownerId: toNumberId(ownerId) } });
+  async update(orgId: string, id: string, input: UpdateBuildingInput) {
+    const existing = await prisma.building.findFirst({ where: { id: toNumberId(id), orgId: toNumberId(orgId) } });
     if (!existing) throw new NotFoundError("Building not found");
 
     return prisma.building.update({
@@ -75,8 +75,8 @@ export class BuildingService {
     });
   }
 
-  async delete(ownerId: string, id: string) {
-    const existing = await prisma.building.findFirst({ where: { id: toNumberId(id), ownerId: toNumberId(ownerId) } });
+  async delete(orgId: string, id: string) {
+    const existing = await prisma.building.findFirst({ where: { id: toNumberId(id), orgId: toNumberId(orgId) } });
     if (!existing) throw new NotFoundError("Building not found");
 
     await prisma.building.delete({ where: { id: toNumberId(id) } });

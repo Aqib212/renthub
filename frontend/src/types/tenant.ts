@@ -2,8 +2,7 @@ export type TenantStatus = "ACTIVE" | "FORMER";
 
 export interface Tenant {
   id: number;
-  flatId: number;
-  ownerId: number;
+  flatId: number | null;
   firstName: string;
   lastName: string;
   phone: string | null;
@@ -21,7 +20,14 @@ export interface Tenant {
   moveInDate: string | null;
   moveOutDate: string | null;
   members: number;
+  /** derived from the latest agreement */
   status: TenantStatus;
+  kind?: "PERSON" | "COMPANY";
+  lang?: "BN" | "EN";
+  household?: { name: string; relation?: string; age?: number; nid?: string }[] | null;
+  agreementId?: number | null;
+  agreementStatus?: "DRAFT" | "ACTIVE" | "NOTICE" | "ENDED" | null;
+  flat?: { name: string; floorId: number; floor: { name: string; buildingId: number; building: { name: string } } } | null;
   createdAt: string;
   updatedAt: string;
 }

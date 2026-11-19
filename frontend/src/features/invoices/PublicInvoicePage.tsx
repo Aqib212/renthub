@@ -1,5 +1,7 @@
 import { useParams } from "react-router-dom";
-import { Box, Button, CircularProgress, Typography, Stack } from "@mui/material";
+import { useState } from "react";
+import { Box, Button, CircularProgress, Typography, Stack, ToggleButton, ToggleButtonGroup } from "@mui/material";
+import { translate, type Lang } from "@/i18n";
 import { PrintOutlined, HomeWork } from "@mui/icons-material";
 import { useQuery } from "@tanstack/react-query";
 import { invoiceApi } from "@/api/invoice";
@@ -13,25 +15,34 @@ export const PublicInvoicePage = () => {
     queryFn: () => invoiceApi.getShared(token),
     retry: false,
   });
+  const [chosen, setChosen] = useState<Lang | null>(null);
+  // the tenant's language (Bangla unless set to English), switchable here
+  const lang: Lang = chosen ?? ((invoice?.tenant as any)?.lang === "EN" ? "en" : "bn");
 
   return (
-    <Box sx={{ minHeight: "100vh", bgcolor: "background.default", py: { xs: 2, sm: 5 }, px: { xs: 1.5, sm: 3 } }}>
+    <Box lang={lang} sx={{ minHeight: "100vh", bgcolor: "background.default", py: { xs: 2, sm: 5 }, px: { xs: 1.5, sm: 3 } }}>
       <InvoicePrintStyles />
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ maxWidth: 794, mx: "auto", mb: 2, displayPrint: "none" }}>
         <Stack direction="row" spacing={1} alignItems="center">
           <HomeWork color="primary" />
           <Typography sx={{ fontWeight: 700 }}>RentHub</Typography>
         </Stack>
-        {invoice && <Button variant="contained" startIcon={<PrintOutlined />} onClick={() => window.print()}>Print / Save PDF</Button>}
+        <Stack direction="row" spacing={1}>
+          <ToggleButtonGroup exclusive size="small" value={lang} onChange={(_, v) => v && setChosen(v)} aria-label="Language">
+            <ToggleButton value="bn">বাংলা</ToggleButton>
+            <ToggleButton value="en">English</ToggleButton>
+          </ToggleButtonGroup>
+          {invoice && <Button variant="contained" startIcon={<PrintOutlined />} onClick={() => window.print()}>{translate(lang, "common.print")}</Button>}
+        </Stack>
       </Stack>
       {isLoading && <Box sx={{ textAlign: "center", py: 10 }}><CircularProgress /></Box>}
       {error && (
         <Box sx={{ textAlign: "center", py: 10 }}>
-          <Typography variant="h6">Invoice not found</Typography>
-          <Typography color="text.secondary">This link is invalid. Please ask your house owner for a new one.</Typography>
+          <Typography variant="h6">{translate(lang, "inv.notFound")}</Typography>
+          <Typography color="text.secondary">{translate(lang, "inv.badLink")}</Typography>
         </Box>
       )}
-      {invoice && <InvoiceDocument invoice={invoice} />}
+      {invoice && <InvoiceDocument invoice={invoice} lang={lang} />}
     </Box>
   );
 };

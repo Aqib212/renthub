@@ -16,7 +16,13 @@ export const createTenantSchema = z.object({
   moveInDate: z.string().optional(),
   moveOutDate: z.string().optional(),
   members: z.coerce.number().int().min(1).max(50).optional(),
-  status: z.enum(["ACTIVE", "FORMER"]).default("ACTIVE"),
+  status: z.enum(["ACTIVE", "FORMER"]).optional(),
+  kind: z.enum(["PERSON", "COMPANY"]).optional(),
+  /** language of this tenant's SMS and receipts */
+  lang: z.enum(["BN", "EN"]).optional(),
+  /** deposit received at move-in (goes to the agreement's deposit ledger) */
+  deposit: z.coerce.number().min(0).optional(),
+  household: z.array(z.object({ name: z.string().max(100), relation: z.string().max(50).optional(), age: z.coerce.number().int().min(0).max(120).optional(), nid: z.string().max(50).optional() })).optional(),
 });
 
 export const updateTenantSchema = createTenantSchema.partial();

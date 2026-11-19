@@ -14,7 +14,8 @@ export const registerSchema = z.object({
     .regex(/[0-9]/, "Password must contain at least one number"),
   firstName: z.string().min(1, "First name is required").max(100),
   lastName: z.string().min(1, "Last name is required").max(100),
-  role: z.enum(["HOUSE_OWNER", "MANAGER", "ACCOUNTANT"]).default("HOUSE_OWNER"),
+  /** Name of the new workspace; defaults to the person's name. Staff join by invitation instead. */
+  orgName: z.string().trim().min(1).max(200).optional(),
 });
 
 export const loginSchema = z.object({

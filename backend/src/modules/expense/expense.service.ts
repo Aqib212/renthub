@@ -12,17 +12,17 @@ function toNumber(val: unknown): number {
 }
 
 export class ExpenseService {
-  async create(ownerId: string, input: CreateExpenseInput) {
+  async create(orgId: string, input: CreateExpenseInput) {
     if (input.buildingId) {
       const building = await prisma.building.findFirst({
-        where: { id: toNumberId(input.buildingId), ownerId: toNumberId(ownerId) },
+        where: { id: toNumberId(input.buildingId), orgId: toNumberId(orgId) },
       });
       if (!building) throw new NotFoundError("Building not found");
     }
 
     const expense = await prisma.expense.create({
       data: {
-        ownerId: toNumberId(ownerId),
+        orgId: toNumberId(orgId),
         buildingId: input.buildingId ? toNumberId(input.buildingId) : null,
         category: input.category as ExpenseCategory,
         amount: input.amount,
@@ -41,11 +41,11 @@ export class ExpenseService {
     };
   }
 
-  async findAll(ownerId: string, query: {
+  async findAll(orgId: string, query: {
     page: number; limit: number; category?: string; buildingId?: number;
     dateFrom?: string; dateTo?: string; search?: string;
   }) {
-    const where: any = { ownerId: toNumberId(ownerId) };
+    const where: any = { orgId: toNumberId(orgId) };
 
     if (query.category) where.category = query.category;
     if (query.buildingId) where.buildingId = toNumberId(query.buildingId);
@@ -83,9 +83,9 @@ export class ExpenseService {
     };
   }
 
-  async findById(ownerId: string, id: string) {
+  async findById(orgId: string, id: string) {
     const expense = await prisma.expense.findFirst({
-      where: { id: toNumberId(id), ownerId: toNumberId(ownerId) },
+      where: { id: toNumberId(id), orgId: toNumberId(orgId) },
       include: { building: { select: { name: true, id: true } } },
     });
     if (!expense) throw new NotFoundError("Expense not found");
@@ -97,13 +97,13 @@ export class ExpenseService {
     };
   }
 
-  async update(ownerId: string, id: string, input: UpdateExpenseInput) {
-    const existing = await prisma.expense.findFirst({ where: { id: toNumberId(id), ownerId: toNumberId(ownerId) } });
+  async update(orgId: string, id: string, input: UpdateExpenseInput) {
+    const existing = await prisma.expense.findFirst({ where: { id: toNumberId(id), orgId: toNumberId(orgId) } });
     if (!existing) throw new NotFoundError("Expense not found");
 
     if (input.buildingId) {
       const building = await prisma.building.findFirst({
-        where: { id: toNumberId(input.buildingId), ownerId: toNumberId(ownerId) },
+        where: { id: toNumberId(input.buildingId), orgId: toNumberId(orgId) },
       });
       if (!building) throw new NotFoundError("Building not found");
     }
@@ -127,8 +127,8 @@ export class ExpenseService {
     };
   }
 
-  async remove(ownerId: string, id: string) {
-    const existing = await prisma.expense.findFirst({ where: { id: toNumberId(id), ownerId: toNumberId(ownerId) } });
+  async remove(orgId: string, id: string) {
+    const existing = await prisma.expense.findFirst({ where: { id: toNumberId(id), orgId: toNumberId(orgId) } });
     if (!existing) throw new NotFoundError("Expense not found");
     await prisma.expense.delete({ where: { id: toNumberId(id) } });
   }

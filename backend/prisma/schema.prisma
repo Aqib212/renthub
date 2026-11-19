@@ -9,8 +9,14 @@ datasource db {
 
 enum UserRole {
   SUPER_ADMIN
-  HOUSE_OWNER
+  USER
+}
+
+/// Role of a user inside one organisation (workspace).
+enum OrgRole {
+  OWNER
   MANAGER
+  CARETAKER
   ACCOUNTANT
 }
 
@@ -23,12 +29,72 @@ enum UserStatus {
 enum FlatStatus {
   VACANT
   OCCUPIED
+  NOTICE
   UNDER_MAINTENANCE
 }
 
-enum TenantStatus {
+/// What an Asset is. Vehicles arrive in phase 6 with their own detail table.
+enum AssetKind {
+  UNIT
+  VEHICLE
+}
+
+enum UnitType {
+  FLAT
+  ROOM
+  SEAT
+  SHOP
+  GARAGE
+}
+
+enum ElectricityMode {
+  SUBMETER
+  PREPAID
+  SHARED
+}
+
+enum PartyKind {
+  PERSON
+  COMPANY
+}
+
+/// MONTHLY now; DAILY/WEEKLY (driver jama) and TRIP (rent-a-car) are reserved for phases 6-7.
+enum BillingCycle {
+  MONTHLY
+  DAILY
+  WEEKLY
+  TRIP
+}
+
+enum AgreementStatus {
+  DRAFT
   ACTIVE
-  FORMER
+  NOTICE
+  ENDED
+}
+
+enum Lang {
+  BN
+  EN
+}
+
+enum NotificationChannel {
+  SMS
+  EMAIL
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum DepositType {
+  RECEIVED
+  ADJUSTED
+  DEDUCTED_DAMAGE
+  REFUNDED
 }
 
 enum InvoiceStatus {
@@ -45,6 +111,8 @@ enum PaymentMethod {
   ROCKET
   BANK
   CHEQUE
+  /// deposit adjusted against dues at move-out (not cash received)
+  DEPOSIT
 }
 
 enum ExpenseCategory {
@@ -66,71 +134,114 @@ enum CalcMethod {
 }
 
 model User {
-  id            BigInt     @id @default(autoincrement())
-  email         String     @unique @db.VarChar(255)
-  phone         String?    @unique @db.VarChar(20)
-  password      String     @db.VarChar(255)
-  firstName     String     @db.VarChar(100)
-  lastName      String     @db.VarChar(100)
-  role          UserRole   @default(HOUSE_OWNER)
-  status        UserStatus @default(ACTIVE)
-  emailVerified Boolean    @default(false)
-  phoneVerified  Boolean   @default(false)
-  avatar        String?    @db.Text
-  refreshToken  String?    @db.Text
-  otp           String?    @db.VarChar(6)
-  otpExpiresAt  DateTime?
-  otpPurpose    String?    @db.VarChar(20)
-  resetToken    String?    @db.Text
+  id                  BigInt     @id @default(autoincrement())
+  email               String     @unique @db.VarChar(255)
+  phone               String?    @unique @db.VarChar(20)
+  password            String     @db.VarChar(255)
+  firstName           String     @db.VarChar(100)
+  lastName            String     @db.VarChar(100)
+  role                UserRole   @default(USER)
+  status              UserStatus @default(ACTIVE)
+  emailVerified       Boolean    @default(false)
+  phoneVerified       Boolean    @default(false)
+  avatar              String?    @db.Text
+  refreshToken        String?    @db.Text
+  otp                 String?    @db.VarChar(6)
+  otpExpiresAt        DateTime?
+  otpPurpose          String?    @db.VarChar(20)
+  resetToken          String?    @db.Text
   resetTokenExpiresAt DateTime?
-  loginAttempts Int       @default(0)
-  lockedUntil   DateTime?
-  lastLoginAt   DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  loginAttempts       Int        @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
 
-  ownerProfile  OwnerProfile?
-  auditLogs     AuditLog[]
-  buildings     Building[]
-  tenants       Tenant[]
-  invoices      Invoice[]
-  payments      Payment[]
-  expenses      Expense[]
-  billTypes     BillType[]
+  ownerProfile OwnerProfile?
+  auditLogs    AuditLog[]
+  memberships  Membership[]
 
   @@map("users")
 }
 
+/// A landlord business (workspace). Every business row belongs to one.
+model Organization {
+  id        BigInt   @id @default(autoincrement())
+  name      String   @db.VarChar(200)
+  plan      String   @default("FREE") @db.VarChar(30)
+  unitLimit Int?
+  settings  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships   Membership[]
+  buildings     Building[]
+  tenants       Tenant[]
+  billTypes     BillType[]
+  invoices      Invoice[]
+  payments      Payment[]
+  expenses      Expense[]
+  assets        Asset[]
+  agreements    Agreement[]
+  counters      OrgCounter[]
+  notifications Notification[]
+  handovers     CashHandover[]
+
+  @@map("organizations")
+}
+
+model Membership {
+  id          BigInt       @id @default(autoincrement())
+  userId      BigInt
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orgId       BigInt
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  role        OrgRole
+  /// null = all buildings; otherwise an array of building ids this member may see
+  buildingIds Json?
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  collected         Payment[]      @relation("CollectedBy")
+  handoversGiven    CashHandover[] @relation("HandoverFrom")
+  handoversReceived CashHandover[] @relation("HandoverTo")
+
+  @@unique([userId, orgId])
+  @@index([orgId])
+  @@map("memberships")
+}
+
 model OwnerProfile {
-  id              BigInt   @id @default(autoincrement())
-  userId          BigInt   @unique
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  nid             String?  @db.VarChar(50)
-  passport        String?  @db.VarChar(50)
-  drivingLicense  String?  @db.VarChar(50)
-  occupation      String?  @db.VarChar(100)
-  office          String?  @db.VarChar(255)
-  emergencyContact String? @db.VarChar(20)
-  presentAddress  String?  @db.Text
-  permanentAddress String? @db.Text
-  photo           String?  @db.Text
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id               BigInt   @id @default(autoincrement())
+  userId           BigInt   @unique
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nid              String?  @db.VarChar(50)
+  passport         String?  @db.VarChar(50)
+  drivingLicense   String?  @db.VarChar(50)
+  occupation       String?  @db.VarChar(100)
+  office           String?  @db.VarChar(255)
+  emergencyContact String?  @db.VarChar(20)
+  presentAddress   String?  @db.Text
+  permanentAddress String?  @db.Text
+  photo            String?  @db.Text
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   @@map("owner_profiles")
 }
 
 model AuditLog {
-  id         BigInt   @id @default(autoincrement())
-  userId     BigInt
-  user       User     @relation(fields: [userId], references: [id])
-  action     String   @db.VarChar(100)
-  entity     String?  @db.VarChar(100)
-  entityId   String?
-  metadata   Json?
-  ipAddress  String?  @db.VarChar(45)
-  userAgent  String?  @db.Text
-  createdAt  DateTime @default(now())
+  id        BigInt   @id @default(autoincrement())
+  userId    BigInt
+  user      User     @relation(fields: [userId], references: [id])
+  action    String   @db.VarChar(100)
+  entity    String?  @db.VarChar(100)
+  entityId  String?
+  metadata  Json?
+  ipAddress String?  @db.VarChar(45)
+  userAgent String?  @db.Text
+  createdAt DateTime @default(now())
 
   @@index([userId])
   @@index([createdAt])
@@ -138,23 +249,23 @@ model AuditLog {
 }
 
 model Building {
-  id            BigInt   @id @default(autoincrement())
-  ownerId       BigInt
-  owner         User     @relation(fields: [ownerId], references: [id])
-  name          String   @db.VarChar(200)
-  holdingNumber String?  @db.VarChar(100)
-  address       String?  @db.Text
-  ward          String?  @db.VarChar(50)
-  area          String?  @db.VarChar(100)
-  district      String?  @db.VarChar(100)
-  description   String?  @db.Text
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id            BigInt       @id @default(autoincrement())
+  orgId         BigInt
+  org           Organization @relation(fields: [orgId], references: [id])
+  name          String       @db.VarChar(200)
+  holdingNumber String?      @db.VarChar(100)
+  address       String?      @db.Text
+  ward          String?      @db.VarChar(50)
+  area          String?      @db.VarChar(100)
+  district      String?      @db.VarChar(100)
+  description   String?      @db.Text
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
   floors   Floor[]
   expenses Expense[]
 
-  @@index([ownerId])
+  @@index([orgId])
   @@map("buildings")
 }
 
@@ -174,25 +285,34 @@ model Floor {
 }
 
 model Flat {
-  id              BigInt     @id @default(autoincrement())
+  id              BigInt          @id @default(autoincrement())
   floorId         BigInt
-  floor           Floor      @relation(fields: [floorId], references: [id], onDelete: Cascade)
-  name            String     @db.VarChar(100)
-  flatNumber      String?    @db.VarChar(50)
-  bedrooms        Int        @default(0)
-  bathrooms       Int        @default(0)
-  kitchens        Int        @default(1)
-  balconies       Int        @default(0)
-  area            Decimal?   @db.Decimal(10, 2)
-  rent            Decimal    @db.Decimal(12, 2)
-  advance         Decimal?   @db.Decimal(12, 2)
-  securityDeposit Decimal?   @db.Decimal(12, 2)
-  sanctionedLoad  Decimal?   @db.Decimal(8, 2)
-  status          FlatStatus @default(VACANT)
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  floor           Floor           @relation(fields: [floorId], references: [id], onDelete: Cascade)
+  name            String          @db.VarChar(100)
+  flatNumber      String?         @db.VarChar(50)
+  bedrooms        Int             @default(0)
+  bathrooms       Int             @default(0)
+  kitchens        Int             @default(1)
+  balconies       Int             @default(0)
+  area            Decimal?        @db.Decimal(10, 2)
+  /// asking terms for the next agreement; the real ones live on Agreement / DepositEntry
+  rent            Decimal         @db.Decimal(12, 2)
+  advance         Decimal?        @db.Decimal(12, 2)
+  securityDeposit Decimal?        @db.Decimal(12, 2)
+  assetId         BigInt          @unique
+  asset           Asset           @relation(fields: [assetId], references: [id])
+  unitType        UnitType        @default(FLAT)
+  /// rooms and seats sit inside a flat
+  parentId        BigInt?
+  parent          Flat?           @relation("SubUnits", fields: [parentId], references: [id])
+  subUnits        Flat[]          @relation("SubUnits")
+  electricityMode ElectricityMode @default(SUBMETER)
+  toLet           Boolean         @default(false)
+  sanctionedLoad  Decimal?        @db.Decimal(8, 2)
+  status          FlatStatus      @default(VACANT)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 
-  tenants       Tenant[]
   invoices    Invoice[]
   charges     FlatCharge[]
   billEntries BillEntry[]
@@ -204,10 +324,8 @@ model Flat {
 
 model Tenant {
   id               BigInt       @id @default(autoincrement())
-  flatId           BigInt
-  flat             Flat         @relation(fields: [flatId], references: [id])
-  ownerId          BigInt
-  owner            User         @relation(fields: [ownerId], references: [id])
+  orgId            BigInt
+  org              Organization @relation(fields: [orgId], references: [id])
   firstName        String       @db.VarChar(100)
   lastName         String       @db.VarChar(100)
   phone            String?      @db.VarChar(20)
@@ -221,45 +339,45 @@ model Tenant {
   presentAddress   String?      @db.Text
   permanentAddress String?      @db.Text
   photo            String?      @db.Text
-  agreementDoc     String?      @db.Text
-  moveInDate       DateTime?
-  moveOutDate      DateTime?
+  kind             PartyKind    @default(PERSON)
+  /// language of the SMS and receipts this person gets
+  lang             Lang         @default(BN)
   members          Int          @default(1)
-  status           TenantStatus @default(ACTIVE)
+  /// household for the DMP CIMS form: [{ name, relation, age, nid }]
+  household        Json?
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
-  invoices Invoice[]
+  invoices   Invoice[]
+  agreements Agreement[]
 
-  @@index([flatId])
-  @@index([ownerId])
-  @@index([status])
+  @@index([orgId])
   @@map("tenants")
 }
 
 model BillType {
-  id                BigInt     @id @default(autoincrement())
-  ownerId           BigInt
-  owner             User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  name              String     @db.VarChar(100)
+  id                BigInt       @id @default(autoincrement())
+  orgId             BigInt
+  org               Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name              String       @db.VarChar(100)
   calcMethod        CalcMethod
-  rate              Decimal?   @db.Decimal(12, 2)
-  unitLabel         String?    @db.VarChar(20)
+  rate              Decimal?     @db.Decimal(12, 2)
+  unitLabel         String?      @db.VarChar(20)
   slabs             Json?
-  fixedCharge       Decimal?   @db.Decimal(10, 2)
-  demandChargePerKw Decimal?   @db.Decimal(10, 2)
-  vatPercent        Decimal?   @db.Decimal(5, 2)
-  appliesToAll      Boolean    @default(true)
-  isActive          Boolean    @default(true)
-  sortOrder         Int        @default(0)
-  createdAt         DateTime   @default(now())
-  updatedAt         DateTime   @updatedAt
+  fixedCharge       Decimal?     @db.Decimal(10, 2)
+  demandChargePerKw Decimal?     @db.Decimal(10, 2)
+  vatPercent        Decimal?     @db.Decimal(5, 2)
+  appliesToAll      Boolean      @default(true)
+  isActive          Boolean      @default(true)
+  sortOrder         Int          @default(0)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
   flatCharges  FlatCharge[]
   entries      BillEntry[]
   invoiceItems InvoiceItem[]
 
-  @@unique([ownerId, name])
+  @@unique([orgId, name])
   @@map("bill_types")
 }
 
@@ -299,36 +417,45 @@ model BillEntry {
 }
 
 model Invoice {
-  id            BigInt        @id @default(autoincrement())
-  flatId        BigInt
-  flat          Flat          @relation(fields: [flatId], references: [id])
-  tenantId      BigInt?
-  tenant        Tenant?       @relation(fields: [tenantId], references: [id])
-  ownerId       BigInt
-  owner         User          @relation(fields: [ownerId], references: [id])
-  month         Int
-  year          Int
-  rent          Decimal       @default(0) @db.Decimal(12, 2)
-  previousDue   Decimal       @default(0) @db.Decimal(12, 2)
-  discount      Decimal       @default(0) @db.Decimal(12, 2)
-  fine          Decimal       @default(0) @db.Decimal(12, 2)
-  totalAmount   Decimal       @db.Decimal(12, 2)
-  paidAmount    Decimal       @default(0) @db.Decimal(12, 2)
-  dueAmount     Decimal       @db.Decimal(12, 2)
-  status        InvoiceStatus @default(PENDING)
-  dueDate       DateTime?
+  id             BigInt        @id @default(autoincrement())
+  flatId         BigInt
+  flat           Flat          @relation(fields: [flatId], references: [id])
+  tenantId       BigInt?
+  tenant         Tenant?       @relation(fields: [tenantId], references: [id])
+  orgId          BigInt
+  org            Organization  @relation(fields: [orgId], references: [id])
+  month          Int
+  year           Int
+  rent           Decimal       @default(0) @db.Decimal(12, 2)
+  previousDue    Decimal       @default(0) @db.Decimal(12, 2)
+  discount       Decimal       @default(0) @db.Decimal(12, 2)
+  fine           Decimal       @default(0) @db.Decimal(12, 2)
+  totalAmount    Decimal       @db.Decimal(12, 2)
+  paidAmount     Decimal       @default(0) @db.Decimal(12, 2)
+  dueAmount      Decimal       @db.Decimal(12, 2)
+  status         InvoiceStatus @default(PENDING)
+  dueDate        DateTime?
   notes          String?       @db.Text
   shareToken     String?       @unique @db.VarChar(64)
   carriedForward Boolean       @default(false)
+  /// null only on invoices made before agreements existed
+  agreementId    BigInt?
+  agreement      Agreement?    @relation(fields: [agreementId], references: [id])
+  assetId        BigInt?
+  asset          Asset?        @relation(fields: [assetId], references: [id])
+  periodStart    DateTime?     @db.Date
+  periodEnd      DateTime?     @db.Date
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  payments Payment[]
-  items    InvoiceItem[]
+  payments      Payment[]
+  items         InvoiceItem[]
+  notifications Notification[]
 
-  @@unique([flatId, month, year])
-  @@index([ownerId, month, year])
-  @@index([ownerId, status])
+  @@unique([agreementId, periodStart])
+  @@index([flatId, month, year])
+  @@index([orgId, month, year])
+  @@index([orgId, status])
   @@index([tenantId])
   @@map("invoices")
 }
@@ -355,8 +482,8 @@ model Payment {
   id            BigInt        @id @default(autoincrement())
   invoiceId     BigInt
   invoice       Invoice       @relation(fields: [invoiceId], references: [id])
-  ownerId       BigInt
-  owner         User          @relation(fields: [ownerId], references: [id])
+  orgId         BigInt
+  org           Organization  @relation(fields: [orgId], references: [id])
   amount        Decimal       @db.Decimal(12, 2)
   method        PaymentMethod
   transactionId String?       @db.VarChar(100)
@@ -366,26 +493,179 @@ model Payment {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
+  /// RCP-<year>-<seq>, numbered per organisation per year (none for DEPOSIT adjustments)
+  receiptNo     String?        @db.VarChar(30)
+  shareToken    String?        @unique @db.VarChar(64)
+  collectedById BigInt?
+  collectedBy   Membership?    @relation("CollectedBy", fields: [collectedById], references: [id], onDelete: SetNull)
+  handoverId    BigInt?
+  handover      CashHandover?  @relation(fields: [handoverId], references: [id], onDelete: SetNull)
+  notifications Notification[]
+
+  @@unique([orgId, receiptNo])
   @@index([invoiceId])
-  @@index([ownerId, date])
+  @@index([orgId, date])
+  @@index([collectedById, handoverId])
   @@map("payments")
 }
 
 model Expense {
-  id          BigInt           @id @default(autoincrement())
-  ownerId     BigInt
-  owner       User             @relation(fields: [ownerId], references: [id])
+  id          BigInt          @id @default(autoincrement())
+  orgId       BigInt
+  org         Organization    @relation(fields: [orgId], references: [id])
   buildingId  BigInt?
-  building    Building?        @relation(fields: [buildingId], references: [id])
+  building    Building?       @relation(fields: [buildingId], references: [id])
   category    ExpenseCategory
-  amount      Decimal          @db.Decimal(12, 2)
-  description String?          @db.Text
-  date        DateTime         @default(now())
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  amount      Decimal         @db.Decimal(12, 2)
+  description String?         @db.Text
+  date        DateTime        @default(now())
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
 
-  @@index([ownerId, date])
-  @@index([ownerId, category])
+  @@index([orgId, date])
+  @@index([orgId, category])
   @@index([buildingId])
   @@map("expenses")
+}
+
+/// Anything that is rented out. Units (flats, rooms, shops...) now; vehicles in phase 6.
+/// Agreements and invoices point here, so they work the same for every kind.
+model Asset {
+  id        BigInt       @id @default(autoincrement())
+  orgId     BigInt
+  org       Organization @relation(fields: [orgId], references: [id])
+  kind      AssetKind
+  createdAt DateTime     @default(now())
+
+  unit       Flat?
+  agreements Agreement[]
+  invoices   Invoice[]
+
+  @@index([orgId, kind])
+  @@map("assets")
+}
+
+/// Who rents which asset, on what terms. The centre of the rental core.
+model Agreement {
+  id           BigInt          @id @default(autoincrement())
+  orgId        BigInt
+  org          Organization    @relation(fields: [orgId], references: [id])
+  assetId      BigInt
+  asset        Asset           @relation(fields: [assetId], references: [id])
+  tenantId     BigInt
+  tenant       Tenant          @relation(fields: [tenantId], references: [id])
+  cycle        BillingCycle    @default(MONTHLY)
+  /// rent per month (MONTHLY) or jama per day (DAILY, later)
+  rate         Decimal         @db.Decimal(12, 2)
+  startDate    DateTime        @db.Date
+  endDate      DateTime?       @db.Date
+  dueDay       Int             @default(10)
+  noticeDays   Int             @default(60)
+  noticeDate   DateTime?       @db.Date
+  tdsPercent   Decimal         @default(0) @db.Decimal(5, 2)
+  /// rent above Tk 25,000 a month must be paid through a bank (NBR)
+  bankOnly     Boolean         @default(false)
+  status       AgreementStatus @default(DRAFT)
+  documentPath String?         @db.Text
+  /// kind-specific terms (house clauses now; km/hour caps, fuel payer for vehicles later)
+  terms        Json?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  revisions RateRevision[]
+  deposits  DepositEntry[]
+  invoices  Invoice[]
+
+  @@index([orgId, status])
+  @@index([assetId, status])
+  @@index([tenantId])
+  @@map("agreements")
+}
+
+model RateRevision {
+  id            BigInt    @id @default(autoincrement())
+  agreementId   BigInt
+  agreement     Agreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  effectiveFrom DateTime  @db.Date
+  rate          Decimal   @db.Decimal(12, 2)
+  reason        String?   @db.VarChar(255)
+  createdAt     DateTime  @default(now())
+
+  @@index([agreementId, effectiveFrom])
+  @@map("rate_revisions")
+}
+
+/// Deposit ledger: balance = RECEIVED - (ADJUSTED + DEDUCTED_DAMAGE + REFUNDED).
+model DepositEntry {
+  id          BigInt      @id @default(autoincrement())
+  agreementId BigInt
+  agreement   Agreement   @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  type        DepositType
+  amount      Decimal     @db.Decimal(12, 2)
+  date        DateTime    @db.Date
+  note        String?     @db.VarChar(255)
+  createdAt   DateTime    @default(now())
+
+  @@index([agreementId])
+  @@map("deposit_entries")
+}
+
+/// Sequences per organisation, e.g. key "receipt:2026" -> last receipt number used.
+model OrgCounter {
+  orgId BigInt
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  key   String       @db.VarChar(40)
+  value Int          @default(0)
+
+  @@id([orgId, key])
+  @@map("org_counters")
+}
+
+/// Outbox: rows are written inside business transactions and sent by the cron drainer.
+model Notification {
+  id        BigInt              @id @default(autoincrement())
+  orgId     BigInt
+  org       Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  channel   NotificationChannel @default(SMS)
+  to        String?             @db.VarChar(20)
+  template  String              @db.VarChar(30)
+  lang      Lang                @default(BN)
+  payload   Json
+  body      String?             @db.Text
+  status    NotificationStatus  @default(QUEUED)
+  attempts  Int                 @default(0)
+  lastError String?             @db.Text
+  sendAfter DateTime            @default(now())
+  sentAt    DateTime?
+  /// makes queueing idempotent (reminders run daily)
+  dedupeKey String?             @unique @db.VarChar(120)
+  invoiceId BigInt?
+  invoice   Invoice?            @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  paymentId BigInt?
+  payment   Payment?            @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  createdAt DateTime            @default(now())
+
+  @@index([status, sendAfter])
+  @@index([orgId, createdAt])
+  @@map("notifications")
+}
+
+/// Cash a collector (caretaker) hands over to the owner or manager; covers the payments pointing at it.
+model CashHandover {
+  id               BigInt       @id @default(autoincrement())
+  orgId            BigInt
+  org              Organization @relation(fields: [orgId], references: [id])
+  fromMembershipId BigInt
+  from             Membership   @relation("HandoverFrom", fields: [fromMembershipId], references: [id])
+  toMembershipId   BigInt
+  to               Membership   @relation("HandoverTo", fields: [toMembershipId], references: [id])
+  amount           Decimal      @db.Decimal(12, 2)
+  date             DateTime     @db.Date
+  note             String?      @db.VarChar(255)
+  createdAt        DateTime     @default(now())
+
+  payments Payment[]
+
+  @@index([orgId, date])
+  @@map("cash_handovers")
 }

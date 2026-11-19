@@ -102,7 +102,7 @@ export const BillTypeDialog = ({ billType, nextSortOrder, onClose, onSaved }: Pr
                     sx={{
                       width: "100%", textAlign: "left", display: "block", p: 1.5, borderRadius: 2, border: "1.5px solid",
                       borderColor: method === m.value ? "primary.main" : "divider",
-                      bgcolor: method === m.value ? "rgba(15,118,110,0.05)" : "transparent",
+                      bgcolor: method === m.value ? "rgba(11,93,70,0.05)" : "transparent",
                     }}
                   >
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>{m.label}</Typography>

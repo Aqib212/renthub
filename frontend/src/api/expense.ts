@@ -4,12 +4,12 @@ import type { Expense, ExpenseListResponse, ExpenseQueryParams } from "@/types/e
 export const expenseApi = {
   list: async (params?: ExpenseQueryParams): Promise<ExpenseListResponse> => {
     const { data } = await client.get("/expenses", { params });
-    return data;
+    return { data: data.data, meta: data.meta };
   },
 
   getById: async (id: number): Promise<Expense> => {
     const { data } = await client.get(`/expenses/${id}`);
-    return data;
+    return data.data;
   },
 
   create: async (body: {
@@ -20,7 +20,7 @@ export const expenseApi = {
     buildingId?: number;
   }): Promise<Expense> => {
     const { data } = await client.post("/expenses", body);
-    return data;
+    return data.data;
   },
 
   update: async (id: number, body: Partial<{
@@ -31,7 +31,7 @@ export const expenseApi = {
     buildingId: number;
   }>): Promise<Expense> => {
     const { data } = await client.patch(`/expenses/${id}`, body);
-    return data;
+    return data.data;
   },
 
   remove: async (id: number): Promise<void> => {

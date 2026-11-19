@@ -59,19 +59,19 @@ export const DashboardPage = () => {
 
       <Grid container spacing={2} sx={{ mb: 2 }}>
         <Grid item xs={12} sm={6} lg={3}>
-          <StatCard title="Billed this month" value={formatCurrency(stats.currentMonthTotal)} icon={<ReceiptLongOutlined />} color="#4f46e5"
+          <StatCard title="Billed this month" value={formatCurrency(stats.currentMonthTotal)} icon={<ReceiptLongOutlined />} color="#1D4ED8"
             subtitle={`${stats.totalInvoices} invoice(s)`} />
         </Grid>
         <Grid item xs={12} sm={6} lg={3}>
-          <StatCard title="Collected this month" value={formatCurrency(stats.currentMonthCollection)} icon={<Payments />} color="#16a34a"
+          <StatCard title="Collected this month" value={formatCurrency(stats.currentMonthCollection)} icon={<Payments />} color="#0B5D46"
             progress={collectedPct} subtitle={`${Math.round(collectedPct)}% of this month's bills`} />
         </Grid>
         <Grid item xs={12} sm={6} lg={3}>
-          <StatCard title="Total outstanding" value={formatCurrency(stats.totalDue)} icon={<MoneyOff />} color="#dc2626"
+          <StatCard title="Total outstanding" value={formatCurrency(stats.totalDue)} icon={<MoneyOff />} color="#B42318"
             subtitle={`${stats.pendingInvoices} unpaid invoice(s)`} />
         </Grid>
         <Grid item xs={12} sm={6} lg={3}>
-          <StatCard title="Occupancy" value={`${stats.occupiedFlats} / ${stats.totalFlats}`} icon={<Apartment />} color="#0f766e"
+          <StatCard title="Occupancy" value={`${stats.occupiedFlats} / ${stats.totalFlats}`} icon={<Apartment />} color="#0B5D46"
             progress={occupancyPct} subtitle={`${stats.vacantFlats} vacant · ${stats.totalBuildings} building(s)`} />
         </Grid>
       </Grid>

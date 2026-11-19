@@ -3,6 +3,12 @@ export interface AuthTokens {
   refreshToken: string;
 }
 
+export interface MembershipSummary {
+  orgId: string;
+  orgName: string;
+  role: string;
+}
+
 export interface AuthResponse {
   user: {
     id: string;
@@ -14,6 +20,7 @@ export interface AuthResponse {
     status: string;
     emailVerified: boolean;
     avatar: string | null;
+    memberships: MembershipSummary[];
   };
   tokens: AuthTokens;
 }

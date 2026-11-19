@@ -88,8 +88,8 @@ export const MONTH_NAMES = [
 ];
 
 export const STATUS_COLORS: Record<InvoiceStatus, string> = {
-  PENDING: "#d97706",
-  PAID: "#16a34a",
-  PARTIALLY_PAID: "#2563eb",
-  OVERDUE: "#dc2626",
+  PENDING: "#8A5200",
+  PAID: "#0B5D46",
+  PARTIALLY_PAID: "#1D4ED8",
+  OVERDUE: "#B42318",
 };

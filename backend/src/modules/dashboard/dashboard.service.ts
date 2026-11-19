@@ -12,7 +12,7 @@ function toNumber(val: unknown): number {
 }
 
 export class DashboardService {
-  async getOverview(ownerId: string) {
+  async getOverview(orgId: string) {
     const currentMonth = new Date().getMonth() + 1;
     const currentYear = new Date().getFullYear();
 
@@ -26,19 +26,19 @@ export class DashboardService {
       latestPayments,
       pendingInvoices,
     ] = await Promise.all([
-      prisma.building.count({ where: { ownerId: toNumberId(ownerId) } }),
-      prisma.flat.count({ where: { floor: { building: { ownerId: toNumberId(ownerId) } } } }),
+      prisma.building.count({ where: { orgId: toNumberId(orgId) } }),
+      prisma.flat.count({ where: { floor: { building: { orgId: toNumberId(orgId) } } } }),
       prisma.flat.count({
-        where: { floor: { building: { ownerId: toNumberId(ownerId) } }, status: "OCCUPIED" },
+        where: { floor: { building: { orgId: toNumberId(orgId) } }, status: "OCCUPIED" },
       }),
       prisma.invoice.aggregate({
-        where: { ownerId: toNumberId(ownerId), month: currentMonth, year: currentYear },
+        where: { orgId: toNumberId(orgId), month: currentMonth, year: currentYear },
         _sum: { totalAmount: true, paidAmount: true, dueAmount: true },
         _count: true,
       }),
       prisma.payment.aggregate({
         where: {
-          ownerId: toNumberId(ownerId),
+          orgId: toNumberId(orgId),
           date: {
             gte: new Date(currentYear, 0, 1),
             lt: new Date(currentYear + 1, 0, 1),
@@ -48,19 +48,19 @@ export class DashboardService {
       }),
       prisma.expense.aggregate({
         where: {
-          ownerId: toNumberId(ownerId),
+          orgId: toNumberId(orgId),
           date: { gte: new Date(currentYear, 0, 1), lt: new Date(currentYear + 1, 0, 1) },
         },
         _sum: { amount: true },
       }),
       prisma.payment.findMany({
-        where: { ownerId: toNumberId(ownerId) },
+        where: { orgId: toNumberId(orgId) },
         orderBy: { date: "desc" },
         take: 5,
         include: { invoice: { select: { flat: { select: { name: true } } } } },
       }),
       prisma.invoice.count({
-        where: { ownerId: toNumberId(ownerId), carriedForward: false, status: { in: ["PENDING", "OVERDUE", "PARTIALLY_PAID"] } },
+        where: { orgId: toNumberId(orgId), carriedForward: false, status: { in: ["PENDING", "OVERDUE", "PARTIALLY_PAID"] } },
       }),
     ]);
 
@@ -70,18 +70,18 @@ export class DashboardService {
     const monthlyIncomeRows = await prisma.$queryRawUnsafe<any[]>(
       `SELECT MONTH(p.date) as mn, SUM(p.amount) as tot
        FROM payments p
-       WHERE p.ownerId = ? AND p.date >= DATE_SUB(CURRENT_DATE, INTERVAL 6 MONTH)
+       WHERE p.orgId = ? AND p.date >= DATE_SUB(CURRENT_DATE, INTERVAL 6 MONTH)
        GROUP BY MONTH(p.date) ORDER BY mn ASC`,
-      toNumberId(ownerId)
+      toNumberId(orgId)
     );
 
     // Monthly collection data (current year)
     const collectionRows = await prisma.$queryRawUnsafe<any[]>(
       `SELECT i.month as mn, SUM(i.paidAmount) as col, SUM(i.dueAmount) as due
        FROM invoices i
-       WHERE i.ownerId = ? AND i.year = ?
+       WHERE i.orgId = ? AND i.year = ?
        GROUP BY i.month ORDER BY i.month ASC`,
-      toNumberId(ownerId),
+      toNumberId(orgId),
       currentYear
     );
 
@@ -92,15 +92,15 @@ export class DashboardService {
        JOIN flats f ON f.id = i.flatId
        JOIN floors fl ON fl.id = f.floorId
        JOIN buildings b ON b.id = fl.buildingId
-       WHERE i.ownerId = ? AND i.status != 'PAID' AND i.carriedForward = false
+       WHERE i.orgId = ? AND i.status != 'PAID' AND i.carriedForward = false
        GROUP BY f.name ORDER BY due DESC`,
-      toNumberId(ownerId)
+      toNumberId(orgId)
     );
 
     // Invoice status breakdown
     const invoicesByStatus = await prisma.invoice.groupBy({
       by: ["status"],
-      where: { ownerId: toNumberId(ownerId), carriedForward: false },
+      where: { orgId: toNumberId(orgId), carriedForward: false },
       _count: true,
       _sum: { dueAmount: true },
     });
@@ -111,7 +111,7 @@ export class DashboardService {
     );
 
     const collectionStats = await prisma.invoice.aggregate({
-      where: { ownerId: toNumberId(ownerId) },
+      where: { orgId: toNumberId(orgId) },
       _sum: { totalAmount: true, paidAmount: true },
     });
 
@@ -125,15 +125,15 @@ export class DashboardService {
       `SELECT it.label as label, SUM(it.amount) as amt
        FROM invoice_items it
        JOIN invoices i ON i.id = it.invoiceId
-       WHERE i.ownerId = ? AND i.month = ? AND i.year = ?
+       WHERE i.orgId = ? AND i.month = ? AND i.year = ?
        GROUP BY it.label ORDER BY amt DESC`,
-      toNumberId(ownerId),
+      toNumberId(orgId),
       currentMonth,
       currentYear
     );
 
     const unpaid = await prisma.invoice.findMany({
-      where: { ownerId: toNumberId(ownerId), carriedForward: false, status: { not: "PAID" } },
+      where: { orgId: toNumberId(orgId), carriedForward: false, status: { not: "PAID" } },
       orderBy: [{ year: "desc" }, { month: "desc" }],
       take: 8,
       include: {

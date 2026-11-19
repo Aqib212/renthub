@@ -124,7 +124,7 @@ export const MonthlyBillingPage = () => {
     <Box>
       <PageHeader
         title="Monthly Billing"
-        subtitle="Enter this month's meter readings and extra charges, check the totals, then create every tenant's invoice in one click."
+        subtitle={`Rent for ${MONTH_NAMES[month - 1]} is billed in advance; meter readings here are ${MONTH_NAMES[(month + 10) % 12]}'s usage. Invoices are due on the 10th.`}
         actions={
           <>
             <Button variant="outlined" startIcon={<TuneOutlined />} onClick={() => navigate("/bill-types")}>Bill types</Button>
@@ -148,7 +148,7 @@ export const MonthlyBillingPage = () => {
             <CardContent sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", py: 1.5, "&:last-child": { pb: 1.5 } }}>
               <Button onClick={() => shiftMonth(-1)} sx={{ minWidth: 0 }} aria-label="Previous month"><ChevronLeft /></Button>
               <Box sx={{ textAlign: "center" }}>
-                <Typography variant="caption" color="text.secondary">Billing month</Typography>
+                <Typography variant="caption" color="text.secondary">Rent month</Typography>
                 <Typography variant="h6">{MONTH_NAMES[month - 1]} {year}</Typography>
               </Box>
               <Button onClick={() => shiftMonth(1)} sx={{ minWidth: 0 }} aria-label="Next month"><ChevronRight /></Button>

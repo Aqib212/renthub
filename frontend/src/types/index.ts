@@ -4,13 +4,23 @@ export interface User {
   phone: string | null;
   firstName: string;
   lastName: string;
-  role: "SUPER_ADMIN" | "HOUSE_OWNER" | "MANAGER" | "ACCOUNTANT";
+  /** Platform role. Business roles are per workspace, in memberships. */
+  role: "SUPER_ADMIN" | "USER";
   status: "ACTIVE" | "INACTIVE" | "BLOCKED";
   emailVerified: boolean;
   avatar: string | null;
   lastLoginAt?: string;
   createdAt?: string;
   ownerProfile?: OwnerProfile | null;
+  memberships?: Membership[];
+}
+
+export type OrgRole = "OWNER" | "MANAGER" | "CARETAKER" | "ACCOUNTANT";
+
+export interface Membership {
+  orgId: string;
+  orgName: string;
+  role: OrgRole;
 }
 
 export interface OwnerProfile {
@@ -55,7 +65,8 @@ export interface RegisterInput {
   password: string;
   firstName: string;
   lastName: string;
-  role?: "HOUSE_OWNER" | "MANAGER" | "ACCOUNTANT";
+  /** Name of the new workspace (defaults to the person's name). */
+  orgName?: string;
 }
 
 export interface ChangePasswordInput {

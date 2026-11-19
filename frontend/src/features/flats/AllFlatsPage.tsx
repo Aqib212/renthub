@@ -16,7 +16,7 @@ import type { Flat, FlatFormData } from "@/types/flat";
 
 import { PageHeader } from "@/components/ui/PageHeader";
 const STATUS_COLORS: Record<string, "success" | "error" | "warning"> = {
-  OCCUPIED: "success", VACANT: "error", UNDER_MAINTENANCE: "warning",
+  OCCUPIED: "success", VACANT: "error", NOTICE: "warning", UNDER_MAINTENANCE: "warning",
 };
 
 export const AllFlatsPage = () => {
@@ -185,13 +185,14 @@ export const AllFlatsPage = () => {
             <TextField label="Bathrooms" type="number" value={formData.bathrooms} onChange={(e) => updateField("bathrooms", Number(e.target.value))} />
           </Box>
           <Box sx={{ display: "flex", gap: 2, mb: 2 }}>
-            <TextField label="Rent (৳)" type="number" value={formData.rent} onChange={(e) => updateField("rent", Number(e.target.value))} />
-            <TextField label="Advance (৳)" type="number" value={formData.advance} onChange={(e) => updateField("advance", Number(e.target.value))} />
+            <TextField label="Asking rent (৳)" type="number" value={formData.rent} onChange={(e) => updateField("rent", Number(e.target.value))} />
+            <TextField label="Asking advance (৳)" type="number" value={formData.advance} onChange={(e) => updateField("advance", Number(e.target.value))} />
           </Box>
           <Box sx={{ display: "flex", gap: 2, mb: 2 }}>
             <TextField select label="Status" value={formData.status} onChange={(e) => updateField("status", e.target.value)} sx={{ minWidth: 140 }}>
               <MenuItem value="VACANT">Vacant</MenuItem>
-              <MenuItem value="OCCUPIED">Occupied</MenuItem>
+              <MenuItem value="OCCUPIED" disabled>Occupied (from agreement)</MenuItem>
+              <MenuItem value="NOTICE" disabled>On notice (from agreement)</MenuItem>
               <MenuItem value="UNDER_MAINTENANCE">Maintenance</MenuItem>
             </TextField>
           </Box>
@@ -216,13 +217,14 @@ export const AllFlatsPage = () => {
             <TextField label="Bathrooms" type="number" value={editingFlat?.bathrooms || 0} onChange={(e) => setEditingFlat(prev => prev ? { ...prev, bathrooms: Number(e.target.value) } : null)} />
           </Box>
           <Box sx={{ display: "flex", gap: 2, mb: 2 }}>
-            <TextField label="Rent (৳)" type="number" value={editingFlat?.rent || 0} onChange={(e) => setEditingFlat(prev => prev ? { ...prev, rent: Number(e.target.value) } : null)} />
-            <TextField label="Advance (৳)" type="number" value={editingFlat?.advance ?? 0} onChange={(e) => setEditingFlat(prev => prev ? { ...prev, advance: Number(e.target.value) } : null)} />
+            <TextField label="Asking rent (৳)" type="number" value={editingFlat?.rent || 0} onChange={(e) => setEditingFlat(prev => prev ? { ...prev, rent: Number(e.target.value) } : null)} />
+            <TextField label="Asking advance (৳)" type="number" value={editingFlat?.advance ?? 0} onChange={(e) => setEditingFlat(prev => prev ? { ...prev, advance: Number(e.target.value) } : null)} />
           </Box>
           <Box sx={{ display: "flex", gap: 2, mb: 2 }}>
             <TextField select label="Status" value={editingFlat?.status || "VACANT"} onChange={(e) => setEditingFlat(prev => prev ? { ...prev, status: e.target.value as any } : null)} sx={{ minWidth: 140 }}>
               <MenuItem value="VACANT">Vacant</MenuItem>
-              <MenuItem value="OCCUPIED">Occupied</MenuItem>
+              <MenuItem value="OCCUPIED" disabled>Occupied (from agreement)</MenuItem>
+              <MenuItem value="NOTICE" disabled>On notice (from agreement)</MenuItem>
               <MenuItem value="UNDER_MAINTENANCE">Maintenance</MenuItem>
             </TextField>
           </Box>

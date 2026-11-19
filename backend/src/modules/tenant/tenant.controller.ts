@@ -15,31 +15,31 @@ function extractFilePaths(files?: { [fieldname: string]: Express.Multer.File[] }
 }
 
 export const create = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const tenant = await tenantService.create(req.user!.userId, req.params.flatId, req.body, extractFilePaths(req.files as any));
+  const tenant = await tenantService.create(String(req.org!.id), req.params.flatId, req.body, extractFilePaths(req.files as any));
   sendSuccess(res, { statusCode: 201, message: "Tenant created", data: tenant });
 });
 
 export const findAll = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const tenants = await tenantService.findAll(req.user!.userId, req.params.flatId);
+  const tenants = await tenantService.findAll(String(req.org!.id), req.params.flatId);
   sendSuccess(res, { statusCode: 200, message: "Tenants retrieved", data: tenants });
 });
 
 export const findById = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const tenant = await tenantService.findById(req.user!.userId, req.params.id);
+  const tenant = await tenantService.findById(String(req.org!.id), req.params.id);
   sendSuccess(res, { statusCode: 200, message: "Tenant retrieved", data: tenant });
 });
 
 export const update = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const tenant = await tenantService.update(req.user!.userId, req.params.id, req.body, extractFilePaths(req.files as any));
+  const tenant = await tenantService.update(String(req.org!.id), req.params.id, req.body, extractFilePaths(req.files as any));
   sendSuccess(res, { statusCode: 200, message: "Tenant updated", data: tenant });
 });
 
 export const findAllByOwner = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const tenants = await tenantService.findAllByOwner(req.user!.userId);
+  const tenants = await tenantService.findAllByOwner(String(req.org!.id));
   sendSuccess(res, { statusCode: 200, message: "Tenants retrieved", data: tenants });
 });
 
 export const remove = asyncHandler(async (req: AuthRequest, res: Response) => {
-  await tenantService.delete(req.user!.userId, req.params.id);
+  await tenantService.delete(String(req.org!.id), req.params.id);
   sendSuccess(res, { statusCode: 200, message: "Tenant deleted" });
 });

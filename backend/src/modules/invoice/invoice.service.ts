@@ -5,6 +5,7 @@ import { NotFoundError, ConflictError, ValidationError } from "../../shared/util
 import { toNumberId } from "../../shared/utils/helpers";
 import { loadBillingContext, billableFlatWhere } from "../bill-type/bill-type.service";
 import type { UpdateInvoiceInput } from "./invoice.validation";
+import { monthPeriod } from "../../shared/utils/rental";
 
 type Tx = Prisma.TransactionClient;
 type InvoiceStatus = "PENDING" | "PAID" | "PARTIALLY_PAID" | "OVERDUE";
@@ -42,23 +43,25 @@ export async function recalculateInvoice(invoiceId: bigint | number | string, tx
   });
 }
 
-/** Most recent earlier invoice of a flat whose balance has not been carried yet. */
-function previousOpenInvoice(client: Tx | typeof prisma, flatId: bigint, month: number, year: number) {
+/** Most recent earlier invoice of the same agreement whose balance has not been carried yet. */
+function previousOpenInvoice(client: Tx | typeof prisma, agreementId: bigint, periodStart: Date) {
   return client.invoice.findFirst({
-    where: {
-      flatId,
-      carriedForward: false,
-      OR: [{ year: { lt: year } }, { year, month: { lt: month } }],
-    },
-    orderBy: [{ year: "desc" }, { month: "desc" }],
+    where: { agreementId, carriedForward: false, periodStart: { lt: periodStart } },
+    orderBy: { periodStart: "desc" },
   });
 }
 
 const detailInclude = {
   items: { orderBy: { sortOrder: "asc" } },
   payments: { orderBy: { date: "desc" } },
-  tenant: { select: { firstName: true, lastName: true, phone: true, email: true } },
-  owner: { select: { firstName: true, lastName: true, phone: true, email: true } },
+  tenant: { select: { firstName: true, lastName: true, phone: true, email: true, lang: true } },
+  // the landlord shown on the invoice: the workspace name plus its owner's contact
+  org: {
+    select: {
+      name: true,
+      memberships: { where: { role: "OWNER", isActive: true }, take: 1, orderBy: { createdAt: "asc" }, select: { user: { select: { phone: true, email: true } } } },
+    },
+  },
   flat: {
     select: {
       name: true,
@@ -71,127 +74,145 @@ const detailInclude = {
 type InvoiceWithDetail = Prisma.InvoiceGetPayload<{ include: typeof detailInclude }>;
 
 function toDetail(inv: InvoiceWithDetail) {
-  const { flat, owner, tenant, ...rest } = inv;
+  const { flat, org, tenant, ...rest } = inv;
+  const ownerUser = org.memberships[0]?.user;
   return {
     ...rest,
     invoiceNo: invoiceNo(inv),
     flat: { name: flat.name, flatNumber: flat.flatNumber, floorName: flat.floor.name },
     building: flat.floor.building,
-    owner: { name: `${owner.firstName} ${owner.lastName}`, phone: owner.phone, email: owner.email },
-    tenant: tenant && { name: `${tenant.firstName} ${tenant.lastName}`, phone: tenant.phone, email: tenant.email },
+    owner: { name: org.name, phone: ownerUser?.phone ?? null, email: ownerUser?.email ?? null },
+    tenant: tenant && { name: `${tenant.firstName} ${tenant.lastName}`, phone: tenant.phone, email: tenant.email, lang: tenant.lang },
   };
 }
 
 export class InvoiceService {
   /**
-   * Build (and unless dryRun, save) invoices for the given flats of one owner.
-   * Flats that already have an invoice for the month are skipped.
+   * Build (and unless dryRun, save) one invoice per agreement covering the month, for the given flats.
+   * Agreements already invoiced for the month are skipped.
    */
-  private async generate(ownerId: number, month: number, year: number, flatWhere: Prisma.FlatWhereInput, dryRun = false) {
-    const { rows } = await loadBillingContext(ownerId, month, year, flatWhere);
+  private async generate(orgId: number, month: number, year: number, flatWhere: Prisma.FlatWhereInput, dryRun = false) {
+    const { rows } = await loadBillingContext(orgId, month, year, flatWhere);
+    const period = monthPeriod(month, year);
     const existing = new Set(
-      (await prisma.invoice.findMany({ where: { ownerId, month, year }, select: { flatId: true } })).map((i) => i.flatId)
+      (await prisma.invoice.findMany({ where: { orgId, periodStart: period.start, agreementId: { not: null } }, select: { agreementId: true } }))
+        .map((i) => String(i.agreementId))
     );
 
     const created: any[] = [];
     const missing: { flatName: string; billType: string }[] = [];
+    let total = 0;
 
-    for (const { flat, tenant, lines } of rows) {
-      if (existing.has(flat.id)) continue;
+    for (const { flat, agreements, lines } of rows) {
+      for (const [idx, { agreement: a, rent }] of agreements.entries()) {
+        if (!rent) continue;
+        total++;
+        if (existing.has(String(a.id))) continue;
 
-      const rent = num(flat.rent);
-      const items: Prisma.InvoiceItemCreateManyInvoiceInput[] = [{ label: "Rent", amount: rent, sortOrder: 0 }];
-      lines.forEach((l, i) => {
-        if (!l.applies) return;
-        if (!l.result) {
-          // metered/manual types without an entry for this month are left off but reported
-          missing.push({ flatName: flat.name, billType: l.billType.name });
-          return;
+        const items: Prisma.InvoiceItemCreateManyInvoiceInput[] = [{
+          label: "Rent",
+          detail: rent.prorated ? `${rent.days} of ${rent.monthDays} days` : null,
+          quantity: rent.prorated ? rent.days : null,
+          rate: rent.prorated ? r2(rent.rate / rent.monthDays) : null,
+          amount: rent.amount,
+          sortOrder: 0,
+        }];
+        // utilities belong to whoever holds the unit at month end (the last agreement)
+        if (idx === agreements.length - 1) {
+          lines.forEach((l, i) => {
+            if (!l.applies) return;
+            if (!l.result) {
+              // metered/manual types without an entry for this month are left off but reported
+              missing.push({ flatName: flat.name, billType: l.billType.name });
+              return;
+            }
+            items.push({
+              billTypeId: l.billType.id,
+              label: l.billType.name,
+              detail: l.result.detail,
+              quantity: l.result.quantity,
+              rate: l.result.rate,
+              amount: l.result.amount,
+              sortOrder: i + 1,
+            });
+          });
         }
-        items.push({
-          billTypeId: l.billType.id,
-          label: l.billType.name,
-          detail: l.result.detail,
-          quantity: l.result.quantity,
-          rate: l.result.rate,
-          amount: l.result.amount,
-          sortOrder: i + 1,
-        });
-      });
 
-      const prev = await previousOpenInvoice(prisma, flat.id, month, year);
-      const previousDue = prev ? num(prev.dueAmount) : 0;
-      const totalAmount = r2(items.reduce((s, it) => s + Number(it.amount), 0) + previousDue);
+        const prev = await previousOpenInvoice(prisma, a.id, period.start);
+        const previousDue = prev ? num(prev.dueAmount) : 0;
+        const totalAmount = r2(items.reduce((s, it) => s + Number(it.amount), 0) + previousDue);
 
-      const data = {
-        flatId: flat.id,
-        tenantId: tenant?.id ?? null,
-        ownerId,
-        month,
-        year,
-        rent,
-        previousDue,
-        totalAmount,
-        dueAmount: totalAmount,
-        dueDate: new Date(year, month - 1, 10),
-      };
+        const data = {
+          flatId: flat.id,
+          tenantId: a.tenantId,
+          agreementId: a.id,
+          assetId: a.assetId,
+          orgId,
+          month,
+          year,
+          periodStart: period.start,
+          periodEnd: period.end,
+          rent: rent.amount,
+          previousDue,
+          totalAmount,
+          dueAmount: totalAmount,
+          dueDate: new Date(year, month - 1, a.dueDay),
+        };
 
-      if (dryRun) {
-        created.push({ ...data, items, flatName: flat.name, tenantName: tenant ? `${tenant.firstName} ${tenant.lastName}` : null });
-        continue;
-      }
+        if (dryRun) {
+          created.push({ ...data, items, flatName: flat.name, tenantName: `${a.tenant.firstName} ${a.tenant.lastName}` });
+          continue;
+        }
 
-      try {
-        const inv = await prisma.$transaction(async (tx) => {
-          const inv = await tx.invoice.create({ data: { ...data, items: { createMany: { data: items } } } });
-          if (prev) await tx.invoice.update({ where: { id: prev.id }, data: { carriedForward: true } });
-          return inv;
-        });
-        created.push(inv);
-      } catch (e) {
-        // another request created it first (unique flat+month+year) — treat as already generated
-        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") continue;
-        throw e;
+        try {
+          const inv = await prisma.$transaction(async (tx) => {
+            const inv = await tx.invoice.create({ data: { ...data, items: { createMany: { data: items } } } });
+            if (prev) await tx.invoice.update({ where: { id: prev.id }, data: { carriedForward: true } });
+            return inv;
+          });
+          created.push(inv);
+        } catch (e) {
+          // another request created it first (unique agreement + period): treat as already generated
+          if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") continue;
+          throw e;
+        }
       }
     }
 
-    return { created, missing, total: rows.length, skipped: existing.size };
+    return { created, missing, total, skipped: existing.size };
   }
 
-  async generateForOwner(ownerId: string | number | bigint, month: number, year: number) {
-    const oid = toNumberId(ownerId as any);
-    const { created, missing, total } = await this.generate(oid, month, year, billableFlatWhere(oid));
+  async generateForOrg(orgId: string | number | bigint, month: number, year: number) {
+    const oid = toNumberId(orgId as any);
+    const { created, missing, total } = await this.generate(oid, month, year, billableFlatWhere(oid, month, year));
     return { generated: created.length, total, missing };
   }
 
-  async generateForFlat(ownerId: string | number | bigint, flatId: string | number | bigint, month: number, year: number, dryRun = false) {
-    const oid = toNumberId(ownerId as any);
+  async generateForFlat(orgId: string | number | bigint, flatId: string | number | bigint, month: number, year: number, dryRun = false) {
+    const oid = toNumberId(orgId as any);
     const fid = toNumberId(flatId as any);
-    const flat = await prisma.flat.findFirst({ where: { id: fid, floor: { building: { ownerId: oid } } } });
+    const flat = await prisma.flat.findFirst({ where: { id: fid, floor: { building: { orgId: oid } } } });
     if (!flat) throw new NotFoundError("Flat not found");
 
-    if (await prisma.invoice.findFirst({ where: { flatId: fid, month, year }, select: { id: true } })) {
-      throw new ConflictError(`Invoice already exists for ${month}/${year}`);
-    }
-
-    const { created, missing } = await this.generate(oid, month, year, { id: fid, floor: { building: { ownerId: oid } } }, dryRun);
-    if (!created.length) throw new ValidationError("Flat has no active tenant and is not marked occupied");
+    const { created, missing, total } = await this.generate(oid, month, year, { id: fid, floor: { building: { orgId: oid } } }, dryRun);
+    if (!total) throw new ValidationError("This unit has no agreement covering that month");
+    if (!created.length) throw new ConflictError(`Invoice already exists for ${month}/${year}`);
     if (dryRun) return { ...created[0], missing };
     return { ...(await this.findById(String(oid), String(created[0].id))), missing };
   }
 
   async generateAll(month: number, year: number) {
-    const owners = await prisma.user.findMany({ where: { role: "HOUSE_OWNER", status: "ACTIVE" }, select: { id: true } });
-    const results: { ownerId: string; generated: number; total: number }[] = [];
-    for (const owner of owners) {
-      const { generated, total } = await this.generateForOwner(owner.id, month, year);
-      results.push({ ownerId: String(owner.id), generated, total });
+    const orgs = await prisma.organization.findMany({ select: { id: true } });
+    const results: { orgId: string; generated: number; total: number }[] = [];
+    for (const org of orgs) {
+      const { generated, total } = await this.generateForOrg(org.id, month, year);
+      results.push({ orgId: String(org.id), generated, total });
     }
     return results;
   }
 
-  async findAll(ownerId: string, query: { page: number; limit: number; month?: number; year?: number; status?: string; search?: string }) {
-    const where: Prisma.InvoiceWhereInput = { ownerId: toNumberId(ownerId) };
+  async findAll(orgId: string, query: { page: number; limit: number; month?: number; year?: number; status?: string; search?: string }) {
+    const where: Prisma.InvoiceWhereInput = { orgId: toNumberId(orgId) };
     if (query.month) where.month = query.month;
     if (query.year) where.year = query.year;
     if (query.status) where.status = query.status as InvoiceStatus;
@@ -230,14 +251,14 @@ export class InvoiceService {
     };
   }
 
-  private async owned(ownerId: string, id: string): Promise<Invoice> {
-    const invoice = await prisma.invoice.findFirst({ where: { id: toNumberId(id), ownerId: toNumberId(ownerId) } });
+  private async owned(orgId: string, id: string): Promise<Invoice> {
+    const invoice = await prisma.invoice.findFirst({ where: { id: toNumberId(id), orgId: toNumberId(orgId) } });
     if (!invoice) throw new NotFoundError("Invoice not found");
     return invoice;
   }
 
-  async findById(ownerId: string, id: string) {
-    await this.owned(ownerId, id);
+  async findById(orgId: string, id: string) {
+    await this.owned(orgId, id);
     const inv = await prisma.invoice.findUniqueOrThrow({ where: { id: toNumberId(id) }, include: detailInclude });
     return toDetail(inv);
   }
@@ -246,20 +267,20 @@ export class InvoiceService {
   async findByShareToken(token: string) {
     const inv = await prisma.invoice.findUnique({ where: { shareToken: token }, include: detailInclude });
     if (!inv) throw new NotFoundError("Invoice not found");
-    const { shareToken, ownerId, tenantId, flatId, ...detail } = toDetail(inv);
+    const { shareToken, orgId, tenantId, flatId, ...detail } = toDetail(inv);
     return { ...detail, owner: { ...detail.owner, email: null } };
   }
 
-  async share(ownerId: string, id: string) {
-    const inv = await this.owned(ownerId, id);
+  async share(orgId: string, id: string) {
+    const inv = await this.owned(orgId, id);
     if (inv.shareToken) return { shareToken: inv.shareToken };
     const shareToken = crypto.randomBytes(24).toString("base64url");
     await prisma.invoice.update({ where: { id: inv.id }, data: { shareToken } });
     return { shareToken };
   }
 
-  async update(ownerId: string, id: string, input: UpdateInvoiceInput) {
-    const inv = await this.owned(ownerId, id);
+  async update(orgId: string, id: string, input: UpdateInvoiceInput) {
+    const inv = await this.owned(orgId, id);
 
     await prisma.$transaction(async (tx) => {
       if (input.items) {
@@ -293,11 +314,11 @@ export class InvoiceService {
       await recalculateInvoice(inv.id, tx);
     });
 
-    return this.findById(ownerId, id);
+    return this.findById(orgId, id);
   }
 
-  async deleteInvoice(ownerId: string, id: string) {
-    const inv = await this.owned(ownerId, id);
+  async deleteInvoice(orgId: string, id: string) {
+    const inv = await this.owned(orgId, id);
     if (await prisma.payment.count({ where: { invoiceId: inv.id } })) {
       throw new ValidationError("This invoice has payments. Delete the payments first.");
     }
@@ -306,7 +327,9 @@ export class InvoiceService {
       // re-open the balance this invoice had carried forward
       if (num(inv.previousDue) > 0) {
         const prev = await tx.invoice.findFirst({
-          where: { flatId: inv.flatId, carriedForward: true, OR: [{ year: { lt: inv.year } }, { year: inv.year, month: { lt: inv.month } }] },
+          where: inv.agreementId && inv.periodStart
+            ? { agreementId: inv.agreementId, carriedForward: true, periodStart: { lt: inv.periodStart } }
+            : { flatId: inv.flatId, carriedForward: true, OR: [{ year: { lt: inv.year } }, { year: inv.year, month: { lt: inv.month } }] },
           orderBy: [{ year: "desc" }, { month: "desc" }],
         });
         if (prev) await tx.invoice.update({ where: { id: prev.id }, data: { carriedForward: false } });
@@ -314,8 +337,8 @@ export class InvoiceService {
     });
   }
 
-  async updateStatus(ownerId: string, id: string, status: string) {
-    await this.owned(ownerId, id);
+  async updateStatus(orgId: string, id: string, status: string) {
+    await this.owned(orgId, id);
     return prisma.invoice.update({ where: { id: toNumberId(id) }, data: { status: status as InvoiceStatus } });
   }
 }

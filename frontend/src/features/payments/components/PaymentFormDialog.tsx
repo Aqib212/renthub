@@ -10,6 +10,7 @@ import { METHOD_LABELS } from "@/types/payment";
 import { MONTH_NAMES } from "@/types/invoice";
 import type { PaymentMethod } from "@/types/payment";
 import toast from "react-hot-toast";
+import { toastWarnings } from "@/features/agreements/WarningsAlert";
 import { formatBDT, apiError } from "@/utils/format";
 
 interface Props {
@@ -69,13 +70,14 @@ export function PaymentFormDialog({ open, onClose, preselectedInvoiceId }: Props
       collector: collector || undefined,
       remarks: remarks || undefined,
     }),
-    onSuccess: () => {
+    onSuccess: (p: any) => {
       queryClient.invalidateQueries({ queryKey: ["payments"] });
       queryClient.invalidateQueries({ queryKey: ["invoices"] });
       queryClient.invalidateQueries({ queryKey: ["invoice"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["billing-month"] });
       toast.success("Payment recorded");
+      toastWarnings(p?.warnings); // e.g. cash on rent above ৳25,000 (NBR)
       onClose();
     },
     onError: (e) => toast.error(apiError(e, "Could not record payment")),

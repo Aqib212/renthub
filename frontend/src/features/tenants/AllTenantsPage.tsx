@@ -16,6 +16,8 @@ import type { Tenant, TenantFormData } from "@/types/tenant";
 import dayjs from "dayjs";
 
 import { PageHeader } from "@/components/ui/PageHeader";
+import { Link as RouterLink } from "react-router-dom";
+import { Link } from "@mui/material";
 export const AllTenantsPage = () => {
   const queryClient = useQueryClient();
 
@@ -142,7 +144,7 @@ export const AllTenantsPage = () => {
                           {tenant.firstName[0]}{tenant.lastName[0]}
                         </Avatar>
                         <Box>
-                          <Typography variant="body2" sx={{ fontWeight: 500 }}>{tenant.firstName} {tenant.lastName}</Typography>
+                          <Link component={RouterLink} to={`/tenants/${tenant.id}`} variant="body2" sx={{ fontWeight: 600 }}>{tenant.firstName} {tenant.lastName}</Link>
                           {tenant.email && <Typography variant="caption" color="text.secondary">{tenant.email}</Typography>}
                         </Box>
                       </Box>
@@ -281,7 +283,7 @@ export const AllTenantsPage = () => {
               updateMutation.mutate({
                 buildingId: flat?.floor?.buildingId || 0,
                 floorId: flat?.floorId || 0,
-                flatId: editingTenant.flatId,
+                flatId: editingTenant.flatId ?? 0, // the API finds tenants by id; the flat in the path is only a route prefix
                 id: editingTenant.id,
                 data: buildFormData(data),
               });
@@ -301,7 +303,7 @@ export const AllTenantsPage = () => {
             deleteMutation.mutate({
               buildingId: flat?.floor?.buildingId || 0,
               floorId: flat?.floorId || 0,
-              flatId: deletingTenant.flatId,
+              flatId: deletingTenant.flatId ?? 0,
               id: deletingTenant.id,
             });
           }

@@ -12,7 +12,7 @@ export interface ReportQuery {
 export const reportApi = {
   getData: async (params: ReportQuery) => {
     const { data } = await client.get("/reports", { params });
-    return data;
+    return data.data;
   },
 
   downloadPDF: async (params: ReportQuery): Promise<void> => {

@@ -13,7 +13,6 @@ import {
   InputAdornment,
   IconButton,
   Alert,
-  MenuItem,
 } from "@mui/material";
 import { LoadingButton } from "@mui/lab";
 import { Visibility, VisibilityOff } from "@mui/icons-material";
@@ -37,7 +36,7 @@ const schema = yup.object({
     .string()
     .oneOf([yup.ref("password")], "Passwords must match")
     .required("Please confirm your password"),
-  role: yup.string().oneOf(["HOUSE_OWNER", "MANAGER", "ACCOUNTANT"]).default("HOUSE_OWNER"),
+  orgName: yup.string().max(200).optional(),
 });
 
 type FormData = yup.InferType<typeof schema>;
@@ -54,7 +53,6 @@ export const RegisterPage = () => {
     formState: { errors, isSubmitting },
   } = useForm<FormData>({
     resolver: yupResolver(schema),
-    defaultValues: { role: "HOUSE_OWNER" },
   });
 
   const onSubmit = async (data: FormData) => {
@@ -66,7 +64,7 @@ export const RegisterPage = () => {
         email: data.email,
         phone: data.phone || undefined,
         password: data.password,
-        role: data.role,
+        orgName: data.orgName || undefined,
       });
       const { user, tokens } = response.data.data;
       setAuth(user, tokens);
@@ -120,11 +118,13 @@ export const RegisterPage = () => {
               helperText={errors.confirmPassword?.message}
               sx={{ mb: 2 }}
             />
-            <TextField select label="Account Type" {...register("role")} defaultValue="HOUSE_OWNER" sx={{ mb: 3 }}>
-              <MenuItem value="HOUSE_OWNER">House Owner</MenuItem>
-              <MenuItem value="MANAGER">Manager</MenuItem>
-              <MenuItem value="ACCOUNTANT">Accountant</MenuItem>
-            </TextField>
+            <TextField
+              label="Business name (optional)"
+              placeholder="e.g. Rahman Properties"
+              {...register("orgName")}
+              helperText="Staff don't register here: the owner adds them from Staff & roles."
+              sx={{ mb: 3 }}
+            />
 
             <LoadingButton type="submit" variant="contained" fullWidth size="large" loading={isSubmitting}>
               Create Account

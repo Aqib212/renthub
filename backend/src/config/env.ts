@@ -23,4 +23,18 @@ export const env = {
   otp: {
     expiresInMinutes: parseInt(process.env.OTP_EXPIRES_IN_MINUTES || "10", 10),
   },
+
+  /** Public base URL of the frontend, used in SMS links (receipts, invoices). */
+  appUrl: (process.env.APP_URL || "http://localhost:3000").replace(/\/$/, ""),
+
+  sms: {
+    /** "console" prints messages (default); "http" calls a gateway with the template URL below. */
+    driver: (process.env.SMS_DRIVER || "console") as "console" | "http",
+    /** e.g. https://gateway.example/api?api_key={key}&senderid={sender}&number={to}&message={text} */
+    httpUrl: process.env.SMS_HTTP_URL || "",
+    apiKey: process.env.SMS_API_KEY || "",
+    senderId: process.env.SMS_SENDER_ID || "",
+    /** substring that marks success in the gateway response; empty = any HTTP 2xx */
+    okMatch: process.env.SMS_HTTP_OK || "",
+  },
 } as const;
