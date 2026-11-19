@@ -1,0 +1,53 @@
+RENTHUB - PROJECT DESCRIPTION
+=============================
+
+ONE-LINER
+---------
+RentHub: a full-stack rental management app for house owners in Bangladesh: buildings, tenants, utility billing, invoices and payments in Taka (৳).
+
+
+SHORT VERSION (for LinkedIn, portfolio cards)
+---------------------------------------------
+RentHub is a web app for landlords in Bangladesh to run their rental buildings. It handles flats and tenants, monthly rent and utility bills, payments by cash, bank or mobile wallets (bKash, Nagad, Rocket), and income and expense reports. Utility bills use the BERC electricity slab tariff. Built with React, TypeScript, Express, Prisma and MySQL.
+
+
+FULL VERSION
+------------
+The problem
+Most house owners in Bangladesh still track rent in notebooks. Each month they add up rent, gas, water, electricity and service charges for every flat. They chase unpaid balances from previous months and accept cash, bank transfers, bKash and Nagad. RentHub does all of this in one place, so bills are correct and nothing is forgotten.
+
+Key features
+- Property structure: buildings, floors, flats and tenants, with each flat's status (vacant, occupied or under maintenance).
+- Flexible bill types with five ways to calculate a charge:
+    fixed amount, metered reading, slab tariff (the BERC electricity rates),
+    per person, or an amount entered by hand.
+  Flat-level overrides let one flat pay a different amount or skip a charge.
+- Monthly billing: enter meter readings, preview, then generate one invoice per flat. A scheduled job can generate invoices automatically on the 1st of each month.
+- Carry-forward of dues: an unpaid balance moves to the next month's invoice as "previous due", the way paper rent bills work in Bangladesh.
+- Payments: full or partial, by cash, bKash, Nagad, Rocket, bank or cheque. Invoice status (pending, partially paid, paid, overdue) updates automatically.
+- Shareable invoices: a public link lets a tenant see their invoice without logging in.
+- Expenses and reports: income vs expense, collection, rent roll, outstanding dues and expense detail, with PDF and Excel export.
+- Secure accounts: JWT login with refresh tokens, plus OTP and password-reset flows. Each owner only ever sees their own data.
+
+Tech stack
+- Frontend: React 18, TypeScript, Vite, Material UI, TanStack Query, Zustand, React Hook Form, Yup
+- Backend: Node.js, Express, TypeScript, Prisma ORM, MySQL, Zod validation, node-cron
+- Structure: monorepo with separate frontend and backend packages; the backend is split into modules (routes, controllers, services)
+
+Engineering highlights
+- The bill calculator is a pure function, with its own check script covering every calculation method and the slab tariff edge cases.
+- Payment totals, amounts due and invoice status are re-derived from payments inside database transactions, so the money figures always stay consistent.
+- Money is stored as Decimal and IDs as BigInt. Both are safely converted to JSON numbers for the API.
+- Data isolation is enforced in every service query, not left to the UI.
+
+What's next
+A redesign is in progress based on research into how renting works in Bangladesh. It covers:
+- a SaaS version where many owners each have their own workspace, with roles for managers, caretakers and accountants;
+- written tenancy agreements with rent revisions, a deposit ledger and move-out settlement;
+- SMS receipts and reminders;
+- a Bangla tenant portal with phone login;
+- later, vehicle rentals (CNG daily "jama" leases and rent-a-car bookings) built on the same billing system.
+
+Links
+- Live demo: [ADD LINK]
+- Source code: [ADD LINK]

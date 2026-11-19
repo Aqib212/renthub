@@ -1,0 +1,391 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  HOUSE_OWNER
+  MANAGER
+  ACCOUNTANT
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+}
+
+enum FlatStatus {
+  VACANT
+  OCCUPIED
+  UNDER_MAINTENANCE
+}
+
+enum TenantStatus {
+  ACTIVE
+  FORMER
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  PARTIALLY_PAID
+  OVERDUE
+}
+
+enum PaymentMethod {
+  CASH
+  BKASH
+  NAGAD
+  ROCKET
+  BANK
+  CHEQUE
+}
+
+enum ExpenseCategory {
+  LIFT
+  SECURITY
+  CLEANING
+  COMMON_ELECTRICITY
+  REPAIRS
+  MAINTENANCE
+  MISC
+}
+
+enum CalcMethod {
+  FIXED
+  METERED
+  SLAB
+  PER_PERSON
+  MANUAL
+}
+
+model User {
+  id            BigInt     @id @default(autoincrement())
+  email         String     @unique @db.VarChar(255)
+  phone         String?    @unique @db.VarChar(20)
+  password      String     @db.VarChar(255)
+  firstName     String     @db.VarChar(100)
+  lastName      String     @db.VarChar(100)
+  role          UserRole   @default(HOUSE_OWNER)
+  status        UserStatus @default(ACTIVE)
+  emailVerified Boolean    @default(false)
+  phoneVerified  Boolean   @default(false)
+  avatar        String?    @db.Text
+  refreshToken  String?    @db.Text
+  otp           String?    @db.VarChar(6)
+  otpExpiresAt  DateTime?
+  otpPurpose    String?    @db.VarChar(20)
+  resetToken    String?    @db.Text
+  resetTokenExpiresAt DateTime?
+  loginAttempts Int       @default(0)
+  lockedUntil   DateTime?
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  ownerProfile  OwnerProfile?
+  auditLogs     AuditLog[]
+  buildings     Building[]
+  tenants       Tenant[]
+  invoices      Invoice[]
+  payments      Payment[]
+  expenses      Expense[]
+  billTypes     BillType[]
+
+  @@map("users")
+}
+
+model OwnerProfile {
+  id              BigInt   @id @default(autoincrement())
+  userId          BigInt   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nid             String?  @db.VarChar(50)
+  passport        String?  @db.VarChar(50)
+  drivingLicense  String?  @db.VarChar(50)
+  occupation      String?  @db.VarChar(100)
+  office          String?  @db.VarChar(255)
+  emergencyContact String? @db.VarChar(20)
+  presentAddress  String?  @db.Text
+  permanentAddress String? @db.Text
+  photo           String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("owner_profiles")
+}
+
+model AuditLog {
+  id         BigInt   @id @default(autoincrement())
+  userId     BigInt
+  user       User     @relation(fields: [userId], references: [id])
+  action     String   @db.VarChar(100)
+  entity     String?  @db.VarChar(100)
+  entityId   String?
+  metadata   Json?
+  ipAddress  String?  @db.VarChar(45)
+  userAgent  String?  @db.Text
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model Building {
+  id            BigInt   @id @default(autoincrement())
+  ownerId       BigInt
+  owner         User     @relation(fields: [ownerId], references: [id])
+  name          String   @db.VarChar(200)
+  holdingNumber String?  @db.VarChar(100)
+  address       String?  @db.Text
+  ward          String?  @db.VarChar(50)
+  area          String?  @db.VarChar(100)
+  district      String?  @db.VarChar(100)
+  description   String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  floors   Floor[]
+  expenses Expense[]
+
+  @@index([ownerId])
+  @@map("buildings")
+}
+
+model Floor {
+  id          BigInt   @id @default(autoincrement())
+  buildingId  BigInt
+  building    Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  name        String   @db.VarChar(100)
+  description String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  flats Flat[]
+
+  @@index([buildingId])
+  @@map("floors")
+}
+
+model Flat {
+  id              BigInt     @id @default(autoincrement())
+  floorId         BigInt
+  floor           Floor      @relation(fields: [floorId], references: [id], onDelete: Cascade)
+  name            String     @db.VarChar(100)
+  flatNumber      String?    @db.VarChar(50)
+  bedrooms        Int        @default(0)
+  bathrooms       Int        @default(0)
+  kitchens        Int        @default(1)
+  balconies       Int        @default(0)
+  area            Decimal?   @db.Decimal(10, 2)
+  rent            Decimal    @db.Decimal(12, 2)
+  advance         Decimal?   @db.Decimal(12, 2)
+  securityDeposit Decimal?   @db.Decimal(12, 2)
+  sanctionedLoad  Decimal?   @db.Decimal(8, 2)
+  status          FlatStatus @default(VACANT)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  tenants       Tenant[]
+  invoices    Invoice[]
+  charges     FlatCharge[]
+  billEntries BillEntry[]
+
+  @@index([floorId])
+  @@index([status])
+  @@map("flats")
+}
+
+model Tenant {
+  id               BigInt       @id @default(autoincrement())
+  flatId           BigInt
+  flat             Flat         @relation(fields: [flatId], references: [id])
+  ownerId          BigInt
+  owner            User         @relation(fields: [ownerId], references: [id])
+  firstName        String       @db.VarChar(100)
+  lastName         String       @db.VarChar(100)
+  phone            String?      @db.VarChar(20)
+  email            String?      @db.VarChar(255)
+  nid              String?      @db.VarChar(50)
+  passport         String?      @db.VarChar(50)
+  drivingLicense   String?      @db.VarChar(50)
+  occupation       String?      @db.VarChar(100)
+  office           String?      @db.VarChar(255)
+  emergencyContact String?      @db.VarChar(20)
+  presentAddress   String?      @db.Text
+  permanentAddress String?      @db.Text
+  photo            String?      @db.Text
+  agreementDoc     String?      @db.Text
+  moveInDate       DateTime?
+  moveOutDate      DateTime?
+  members          Int          @default(1)
+  status           TenantStatus @default(ACTIVE)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  invoices Invoice[]
+
+  @@index([flatId])
+  @@index([ownerId])
+  @@index([status])
+  @@map("tenants")
+}
+
+model BillType {
+  id                BigInt     @id @default(autoincrement())
+  ownerId           BigInt
+  owner             User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name              String     @db.VarChar(100)
+  calcMethod        CalcMethod
+  rate              Decimal?   @db.Decimal(12, 2)
+  unitLabel         String?    @db.VarChar(20)
+  slabs             Json?
+  fixedCharge       Decimal?   @db.Decimal(10, 2)
+  demandChargePerKw Decimal?   @db.Decimal(10, 2)
+  vatPercent        Decimal?   @db.Decimal(5, 2)
+  appliesToAll      Boolean    @default(true)
+  isActive          Boolean    @default(true)
+  sortOrder         Int        @default(0)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  flatCharges  FlatCharge[]
+  entries      BillEntry[]
+  invoiceItems InvoiceItem[]
+
+  @@unique([ownerId, name])
+  @@map("bill_types")
+}
+
+model FlatCharge {
+  id         BigInt   @id @default(autoincrement())
+  flatId     BigInt
+  flat       Flat     @relation(fields: [flatId], references: [id], onDelete: Cascade)
+  billTypeId BigInt
+  billType   BillType @relation(fields: [billTypeId], references: [id], onDelete: Cascade)
+  amount     Decimal? @db.Decimal(12, 2)
+  isActive   Boolean  @default(true)
+
+  @@unique([flatId, billTypeId])
+  @@index([billTypeId])
+  @@map("flat_charges")
+}
+
+model BillEntry {
+  id              BigInt   @id @default(autoincrement())
+  flatId          BigInt
+  flat            Flat     @relation(fields: [flatId], references: [id], onDelete: Cascade)
+  billTypeId      BigInt
+  billType        BillType @relation(fields: [billTypeId], references: [id], onDelete: Cascade)
+  month           Int
+  year            Int
+  previousReading Decimal? @db.Decimal(12, 2)
+  currentReading  Decimal? @db.Decimal(12, 2)
+  units           Decimal? @db.Decimal(12, 2)
+  amount          Decimal? @db.Decimal(12, 2)
+  note            String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([flatId, billTypeId, month, year])
+  @@index([billTypeId])
+  @@map("bill_entries")
+}
+
+model Invoice {
+  id            BigInt        @id @default(autoincrement())
+  flatId        BigInt
+  flat          Flat          @relation(fields: [flatId], references: [id])
+  tenantId      BigInt?
+  tenant        Tenant?       @relation(fields: [tenantId], references: [id])
+  ownerId       BigInt
+  owner         User          @relation(fields: [ownerId], references: [id])
+  month         Int
+  year          Int
+  rent          Decimal       @default(0) @db.Decimal(12, 2)
+  previousDue   Decimal       @default(0) @db.Decimal(12, 2)
+  discount      Decimal       @default(0) @db.Decimal(12, 2)
+  fine          Decimal       @default(0) @db.Decimal(12, 2)
+  totalAmount   Decimal       @db.Decimal(12, 2)
+  paidAmount    Decimal       @default(0) @db.Decimal(12, 2)
+  dueAmount     Decimal       @db.Decimal(12, 2)
+  status        InvoiceStatus @default(PENDING)
+  dueDate       DateTime?
+  notes          String?       @db.Text
+  shareToken     String?       @unique @db.VarChar(64)
+  carriedForward Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  payments Payment[]
+  items    InvoiceItem[]
+
+  @@unique([flatId, month, year])
+  @@index([ownerId, month, year])
+  @@index([ownerId, status])
+  @@index([tenantId])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id         BigInt    @id @default(autoincrement())
+  invoiceId  BigInt
+  invoice    Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  billTypeId BigInt?
+  billType   BillType? @relation(fields: [billTypeId], references: [id], onDelete: SetNull)
+  label      String    @db.VarChar(100)
+  detail     String?   @db.VarChar(255)
+  quantity   Decimal?  @db.Decimal(12, 2)
+  rate       Decimal?  @db.Decimal(12, 2)
+  amount     Decimal   @db.Decimal(12, 2)
+  sortOrder  Int       @default(0)
+
+  @@index([invoiceId])
+  @@index([billTypeId])
+  @@map("invoice_items")
+}
+
+model Payment {
+  id            BigInt        @id @default(autoincrement())
+  invoiceId     BigInt
+  invoice       Invoice       @relation(fields: [invoiceId], references: [id])
+  ownerId       BigInt
+  owner         User          @relation(fields: [ownerId], references: [id])
+  amount        Decimal       @db.Decimal(12, 2)
+  method        PaymentMethod
+  transactionId String?       @db.VarChar(100)
+  collector     String?       @db.VarChar(100)
+  remarks       String?       @db.Text
+  date          DateTime      @default(now())
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([invoiceId])
+  @@index([ownerId, date])
+  @@map("payments")
+}
+
+model Expense {
+  id          BigInt           @id @default(autoincrement())
+  ownerId     BigInt
+  owner       User             @relation(fields: [ownerId], references: [id])
+  buildingId  BigInt?
+  building    Building?        @relation(fields: [buildingId], references: [id])
+  category    ExpenseCategory
+  amount      Decimal          @db.Decimal(12, 2)
+  description String?          @db.Text
+  date        DateTime         @default(now())
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([ownerId, date])
+  @@index([ownerId, category])
+  @@index([buildingId])
+  @@map("expenses")
+}
