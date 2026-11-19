@@ -8,9 +8,11 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { PaymentFormDialog } from "@/features/payments/components/PaymentFormDialog";
 import { InvoiceDocument, InvoicePrintStyles } from "./components/InvoiceDocument";
 import { InvoiceActions } from "./components/InvoiceActions";
+import { useT } from "@/i18n";
 import { InvoiceEditDialog } from "./components/InvoiceEditDialog";
 
 export const InvoiceViewPage = () => {
+  const { lang } = useT();
   const { id } = useParams();
   const navigate = useNavigate();
   const invoiceId = Number(id);
@@ -50,7 +52,7 @@ export const InvoiceViewPage = () => {
       {error && <Alert severity="error">Invoice not found.</Alert>}
       {invoice && (
         <Stack alignItems="center">
-          <InvoiceDocument invoice={invoice} />
+          <InvoiceDocument invoice={invoice} lang={lang} />
         </Stack>
       )}
 

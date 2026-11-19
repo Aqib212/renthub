@@ -23,7 +23,7 @@ import { LoadingButton } from "@mui/lab";
 import { Visibility, VisibilityOff } from "@mui/icons-material";
 import toast from "react-hot-toast";
 import { authApi } from "@/api/client";
-import { useAuthStore } from "@/store/authStore";
+import { useAuthStore, useCurrentMembership } from "@/store/authStore";
 
 const profileSchema = yup.object({
   firstName: yup.string().required("First name is required"),
@@ -51,6 +51,7 @@ type PasswordFormData = yup.InferType<typeof passwordSchema>;
 
 export const ProfilePage = () => {
   const { user, setUser } = useAuthStore();
+  const membership = useCurrentMembership();
   const [error, setError] = useState("");
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -111,7 +112,7 @@ export const ProfilePage = () => {
               <Typography variant="h6">{user.firstName} {user.lastName}</Typography>
               <Typography variant="body2" color="text.secondary">{user.email}</Typography>
               <Typography variant="caption" color="text.secondary">
-                {user.role.replace("_", " ")} | {user.status}
+                {membership ? `${membership.role} · ${membership.orgName}` : user.role} | {user.status}
                 {user.emailVerified ? " | Email Verified" : " | Email Not Verified"}
               </Typography>
             </Box>

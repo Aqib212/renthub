@@ -10,7 +10,7 @@ interface StatCardProps {
   progress?: number; // 0–100
 }
 
-export const StatCard = ({ title, value, icon, color = "#0f766e", subtitle, progress }: StatCardProps) => (
+export const StatCard = ({ title, value, icon, color = "#0B5D46", subtitle, progress }: StatCardProps) => (
   <Card sx={{ height: "100%" }}>
     <CardContent sx={{ p: 2.5, "&:last-child": { pb: 2.5 } }}>
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1 }}>

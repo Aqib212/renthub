@@ -92,7 +92,7 @@ renthub/
 | `npm run db:generate` | Regenerate the Prisma client |
 | `npm run prisma:seed --prefix backend` | Load demo data |
 | `npm run prisma:reset --prefix backend` | Drop and recreate the database (deletes all data) |
-| `npx tsx src/shared/utils/billing.check.ts` (in `backend/`) | Run the billing calculator checks |
+| `npm test --prefix backend` | Run the backend tests |
 
 ## Roadmap
 

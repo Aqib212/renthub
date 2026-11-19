@@ -4,8 +4,8 @@ import { toNumberId } from "../../shared/utils/helpers";
 import type { CreateFloorInput, UpdateFloorInput } from "./floor.validation";
 
 export class FloorService {
-  async create(ownerId: string, buildingId: string, input: CreateFloorInput) {
-    const building = await prisma.building.findFirst({ where: { id: toNumberId(buildingId), ownerId: toNumberId(ownerId) } });
+  async create(orgId: string, buildingId: string, input: CreateFloorInput) {
+    const building = await prisma.building.findFirst({ where: { id: toNumberId(buildingId), orgId: toNumberId(orgId) } });
     if (!building) throw new NotFoundError("Building not found");
 
     return prisma.floor.create({
@@ -13,8 +13,8 @@ export class FloorService {
     });
   }
 
-  async findAll(ownerId: string, buildingId: string) {
-    const building = await prisma.building.findFirst({ where: { id: toNumberId(buildingId), ownerId: toNumberId(ownerId) } });
+  async findAll(orgId: string, buildingId: string) {
+    const building = await prisma.building.findFirst({ where: { id: toNumberId(buildingId), orgId: toNumberId(orgId) } });
     if (!building) throw new NotFoundError("Building not found");
 
     return prisma.floor.findMany({
@@ -24,25 +24,25 @@ export class FloorService {
     });
   }
 
-  async findById(ownerId: string, id: string) {
+  async findById(orgId: string, id: string) {
     const floor = await prisma.floor.findFirst({
-      where: { id: toNumberId(id), building: { ownerId: toNumberId(ownerId) } },
+      where: { id: toNumberId(id), building: { orgId: toNumberId(orgId) } },
       include: { _count: { select: { flats: true } } },
     });
     if (!floor) throw new NotFoundError("Floor not found");
     return floor;
   }
 
-  async update(ownerId: string, id: string, input: UpdateFloorInput) {
-    const floor = await prisma.floor.findFirst({ where: { id: toNumberId(id), building: { ownerId: toNumberId(ownerId) } } });
+  async update(orgId: string, id: string, input: UpdateFloorInput) {
+    const floor = await prisma.floor.findFirst({ where: { id: toNumberId(id), building: { orgId: toNumberId(orgId) } } });
     if (!floor) throw new NotFoundError("Floor not found");
 
     return prisma.floor.update({ where: { id: toNumberId(id) }, data: input });
   }
 
-  async findAllByOwner(ownerId: string) {
+  async findAllByOwner(orgId: string) {
     return prisma.floor.findMany({
-      where: { building: { ownerId: toNumberId(ownerId) } },
+      where: { building: { orgId: toNumberId(orgId) } },
       orderBy: { name: "asc" },
       include: {
         _count: { select: { flats: true } },
@@ -51,8 +51,8 @@ export class FloorService {
     });
   }
 
-  async delete(ownerId: string, id: string) {
-    const floor = await prisma.floor.findFirst({ where: { id: toNumberId(id), building: { ownerId: toNumberId(ownerId) } } });
+  async delete(orgId: string, id: string) {
+    const floor = await prisma.floor.findFirst({ where: { id: toNumberId(id), building: { orgId: toNumberId(orgId) } } });
     if (!floor) throw new NotFoundError("Floor not found");
 
     await prisma.floor.delete({ where: { id: toNumberId(id) } });

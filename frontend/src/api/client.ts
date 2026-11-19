@@ -9,10 +9,11 @@ const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  const token = useAuthStore.getState().accessToken;
+  const { accessToken: token, currentOrgId } = useAuthStore.getState();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  if (currentOrgId) config.headers["X-Org-Id"] = currentOrgId;
   return config;
 });
 

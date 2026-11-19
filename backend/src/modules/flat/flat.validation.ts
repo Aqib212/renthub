@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-const flatStatusEnum = z.enum(["VACANT", "OCCUPIED", "UNDER_MAINTENANCE"]);
+// OCCUPIED / NOTICE are set by agreements; the service only lets a person choose VACANT or UNDER_MAINTENANCE
+const flatStatusEnum = z.enum(["VACANT", "OCCUPIED", "NOTICE", "UNDER_MAINTENANCE"]);
+const unitFields = {
+  unitType: z.enum(["FLAT", "ROOM", "SEAT", "SHOP", "GARAGE"]).optional(),
+  electricityMode: z.enum(["SUBMETER", "PREPAID", "SHARED"]).optional(),
+  toLet: z.boolean().optional(),
+};
 
 export const createFlatSchema = z.object({
   name: z.string().min(1, "Flat name is required").max(100),
@@ -15,6 +21,7 @@ export const createFlatSchema = z.object({
   securityDeposit: z.number().min(0).optional(),
   sanctionedLoad: z.number().min(0).nullable().optional(),
   status: flatStatusEnum.default("VACANT"),
+  ...unitFields,
 });
 
 export const updateFlatSchema = z.object({
@@ -30,6 +37,7 @@ export const updateFlatSchema = z.object({
   securityDeposit: z.number().min(0).optional(),
   sanctionedLoad: z.number().min(0).nullable().optional(),
   status: flatStatusEnum.optional(),
+  ...unitFields,
 });
 
 export type CreateFlatInput = z.infer<typeof createFlatSchema>;

@@ -26,7 +26,7 @@ const schema = yup.object({
   advance: yup.number().typeError("Must be a number").min(0).optional(),
   securityDeposit: yup.number().typeError("Must be a number").min(0).optional(),
   sanctionedLoad: yup.number().transform((v, o) => (o === "" ? undefined : v)).typeError("Must be a number").min(0).optional(),
-  status: yup.string().oneOf(["VACANT", "OCCUPIED", "UNDER_MAINTENANCE"]).default("VACANT"),
+  status: yup.string().oneOf(["VACANT", "OCCUPIED", "NOTICE", "UNDER_MAINTENANCE"]).default("VACANT"),
 });
 
 interface FlatFormProps {
@@ -78,14 +78,15 @@ export const FlatForm = ({ open, onClose, onSubmit, initialData, title }: FlatFo
               error={!!errors.sanctionedLoad} helperText={errors.sanctionedLoad?.message || "From the electricity meter; used for the demand charge"} />
           </Box>
           <Box sx={{ display: "flex", gap: 2, mb: 2 }}>
-            <TextField label="Rent (৳)" type="number" {...register("rent")} error={!!errors.rent} helperText={errors.rent?.message} />
-            <TextField label="Advance (৳)" type="number" {...register("advance")} error={!!errors.advance} helperText={errors.advance?.message} />
+            <TextField label="Asking rent (৳)" type="number" {...register("rent")} error={!!errors.rent} helperText={errors.rent?.message} />
+            <TextField label="Asking advance (৳)" type="number" {...register("advance")} error={!!errors.advance} helperText={errors.advance?.message} />
           </Box>
           <Box sx={{ display: "flex", gap: 2, mb: 2 }}>
-            <TextField label="Security Deposit (৳)" type="number" {...register("securityDeposit")} error={!!errors.securityDeposit} helperText={errors.securityDeposit?.message} />
+            <TextField label="Asking security (৳)" type="number" {...register("securityDeposit")} error={!!errors.securityDeposit} helperText={errors.securityDeposit?.message} />
             <TextField select label="Status" {...register("status")} defaultValue="VACANT" sx={{ minWidth: 140 }}>
               <MenuItem value="VACANT">Vacant</MenuItem>
-              <MenuItem value="OCCUPIED">Occupied</MenuItem>
+              <MenuItem value="OCCUPIED" disabled>Occupied (from agreement)</MenuItem>
+              <MenuItem value="NOTICE" disabled>On notice (from agreement)</MenuItem>
               <MenuItem value="UNDER_MAINTENANCE">Maintenance</MenuItem>
             </TextField>
           </Box>

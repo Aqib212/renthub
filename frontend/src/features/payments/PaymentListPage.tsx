@@ -13,6 +13,11 @@ import { METHOD_LABELS, METHOD_COLORS } from "@/types/payment";
 import type { Payment, PaymentMethod, PaymentQueryParams } from "@/types/payment";
 
 import { PageHeader } from "@/components/ui/PageHeader";
+import { Link as RouterLink, useNavigate } from "react-router-dom";
+import { Link } from "@mui/material";
+import { cashApi } from "@/api/collections";
+import { useT } from "@/i18n";
+import { formatBDT } from "@/utils/format";
 export default function PaymentListPage() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(0);
@@ -30,6 +35,9 @@ export default function PaymentListPage() {
     ...filters,
   };
 
+  const { t, lang } = useT();
+  const navigate = useNavigate();
+  const { data: cash } = useQuery({ queryKey: ["cash-pending"], queryFn: cashApi.pending });
   const { data, isLoading } = useQuery({
     queryKey: ["payments", queryParams],
     queryFn: () => paymentApi.list(queryParams),
@@ -63,13 +71,14 @@ export default function PaymentListPage() {
   return (
     <Box>
       <PageHeader
-        title="Payments"
-        subtitle="Every payment received from tenants, with method and reference."
-        actions={
+        title={t("nav.collections")}
+        subtitle="Every payment received, with its receipt number. The tenant gets the receipt by SMS."
+        actions={<>
+          <Button variant="outlined" onClick={() => navigate("/cash-handover")}>{t("cash.withStaff", { amount: formatBDT(cash?.total ?? 0, lang) })}</Button>
           <Button variant="contained" startIcon={<Receipt />} onClick={handleRecordPayment}>
           Record Payment
           </Button>
-        }
+        </>}
       />
 
       <Paper sx={{ p: 2, mb: 2 }}>
@@ -112,23 +121,27 @@ export default function PaymentListPage() {
         <Table>
           <TableHead>
             <TableRow>
+              <TableCell>{t("rcp.view")}</TableCell>
               <TableCell>Flat</TableCell>
               <TableCell>Tenant</TableCell>
               <TableCell>Invoice</TableCell>
               <TableCell>Method</TableCell>
               <TableCell align="right">Amount</TableCell>
-              <TableCell>Transaction ID</TableCell>
+              <TableCell>Reference / collector</TableCell>
               <TableCell>Date</TableCell>
               <TableCell align="right">Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {isLoading ? (
-              <TableRow><TableCell colSpan={8} align="center">Loading...</TableCell></TableRow>
+              <TableRow><TableCell colSpan={9} align="center">Loading...</TableCell></TableRow>
             ) : !data?.data.length ? (
-              <TableRow><TableCell colSpan={8} align="center">No payments found</TableCell></TableRow>
+              <TableRow><TableCell colSpan={9} align="center">No payments found</TableCell></TableRow>
             ) : data.data.map((payment) => (
               <TableRow key={payment.id} hover>
+                <TableCell sx={{ whiteSpace: "nowrap" }}>
+                  {payment.receiptNo ? <Link component={RouterLink} to={`/payments/${payment.id}/receipt`}>{payment.receiptNo}</Link> : "—"}
+                </TableCell>
                 <TableCell>{payment.flatName}</TableCell>
                 <TableCell>{payment.tenantName || "—"}</TableCell>
                 <TableCell>{payment.invoicePeriod}</TableCell>
@@ -140,7 +153,10 @@ export default function PaymentListPage() {
                   />
                 </TableCell>
                 <TableCell align="right">{payment.amount.toLocaleString()}</TableCell>
-                <TableCell>{payment.transactionId || "—"}</TableCell>
+                <TableCell>
+                  {payment.transactionId || "—"}
+                  {payment.collectorName && <Typography variant="body2" color="text.secondary">{payment.collectorName}</Typography>}
+                </TableCell>
                 <TableCell>{new Date(payment.date).toLocaleDateString()}</TableCell>
                 <TableCell align="right">
                   <Tooltip title="View Details">

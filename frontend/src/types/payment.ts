@@ -1,4 +1,5 @@
-export type PaymentMethod = "CASH" | "BKASH" | "NAGAD" | "ROCKET" | "BANK" | "CHEQUE";
+/** DEPOSIT = paid from the tenant's deposit at move-out (never chosen by hand). */
+export type PaymentMethod = "CASH" | "BKASH" | "NAGAD" | "ROCKET" | "BANK" | "CHEQUE" | "DEPOSIT";
 
 export interface Payment {
   id: number;
@@ -10,6 +11,11 @@ export interface Payment {
   collector: string | null;
   remarks: string | null;
   date: string;
+  receiptNo?: string | null;
+  shareToken?: string | null;
+  collectedById?: number | null;
+  /** staff member who took the money, else the old free-text collector */
+  collectorName?: string | null;
   createdAt: string;
   updatedAt: string;
   flatName: string;
@@ -59,6 +65,7 @@ export const METHOD_LABELS: Record<PaymentMethod, string> = {
   ROCKET: "Rocket",
   BANK: "Bank Transfer",
   CHEQUE: "Cheque",
+  DEPOSIT: "From deposit",
 };
 
 export const METHOD_COLORS: Record<PaymentMethod, string> = {
@@ -68,4 +75,5 @@ export const METHOD_COLORS: Record<PaymentMethod, string> = {
   ROCKET: "#2196f3",
   BANK: "#9c27b0",
   CHEQUE: "#607d8b",
+  DEPOSIT: "#55615B",
 };

@@ -1,3 +1,4 @@
+import { sendResult } from "../../shared/utils/apiResponse";
 import { Response, NextFunction } from "express";
 import type { AuthRequest } from "../../middleware/auth.middleware";
 import { PaymentService } from "./payment.service";
@@ -8,8 +9,8 @@ const paymentService = new PaymentService();
 export const create = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const body = createPaymentSchema.parse(req.body);
-    const result = await paymentService.create(req.user!.userId, body);
-    res.status(201).json(result);
+    const result = await paymentService.create(String(req.org!.id), body, req.org!.membershipId);
+    sendResult(res, result, 201);
   } catch (error) {
     next(error);
   }
@@ -18,8 +19,8 @@ export const create = async (req: AuthRequest, res: Response, next: NextFunction
 export const findAll = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const query = paymentQuerySchema.parse(req.query);
-    const result = await paymentService.findAll(req.user!.userId, query);
-    res.json(result);
+    const result = await paymentService.findAll(String(req.org!.id), query);
+    sendResult(res, result);
   } catch (error) {
     next(error);
   }
@@ -27,8 +28,8 @@ export const findAll = async (req: AuthRequest, res: Response, next: NextFunctio
 
 export const findById = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const result = await paymentService.findById(req.user!.userId, req.params.id);
-    res.json(result);
+    const result = await paymentService.findById(String(req.org!.id), req.params.id);
+    sendResult(res, result);
   } catch (error) {
     next(error);
   }
@@ -37,8 +38,8 @@ export const findById = async (req: AuthRequest, res: Response, next: NextFuncti
 export const update = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const body = updatePaymentSchema.parse(req.body);
-    const result = await paymentService.update(req.user!.userId, req.params.id, body);
-    res.json(result);
+    const result = await paymentService.update(String(req.org!.id), req.params.id, body);
+    sendResult(res, result);
   } catch (error) {
     next(error);
   }
@@ -46,8 +47,32 @@ export const update = async (req: AuthRequest, res: Response, next: NextFunction
 
 export const remove = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    await paymentService.remove(req.user!.userId, req.params.id);
+    await paymentService.remove(String(req.org!.id), req.params.id);
     res.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const receipt = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    sendResult(res, await paymentService.receipt(String(req.org!.id), req.params.id));
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const share = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    sendResult(res, await paymentService.share(String(req.org!.id), req.params.id));
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const findByShareToken = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    sendResult(res, await paymentService.findByShareToken(req.params.token));
   } catch (error) {
     next(error);
   }

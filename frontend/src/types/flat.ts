@@ -1,4 +1,16 @@
-export type FlatStatus = "VACANT" | "OCCUPIED" | "UNDER_MAINTENANCE";
+/** OCCUPIED and NOTICE are set by agreements. */
+export type FlatStatus = "VACANT" | "OCCUPIED" | "NOTICE" | "UNDER_MAINTENANCE";
+export type UnitType = "FLAT" | "ROOM" | "SEAT" | "SHOP" | "GARAGE";
+
+/** The agreement holding the unit now (from the flats API). */
+export interface CurrentAgreement {
+  id: number;
+  status: "ACTIVE" | "NOTICE";
+  rate: number;
+  startDate: string;
+  endDate: string | null;
+  tenant: { id: number; firstName: string; lastName: string; phone: string | null };
+}
 
 export interface Flat {
   id: number;
@@ -16,6 +28,10 @@ export interface Flat {
   sanctionedLoad: number | null;
   status: FlatStatus;
   totalTenants: number;
+  assetId?: number;
+  unitType?: UnitType;
+  toLet?: boolean;
+  currentAgreement?: CurrentAgreement | null;
   createdAt: string;
   updatedAt: string;
 }

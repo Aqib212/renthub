@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { verifyAccessToken } from "../shared/utils/jwt";
 import { UnauthorizedError, ForbiddenError } from "../shared/utils/errors";
-import { UserRole } from "@prisma/client";
+import { UserRole, OrgRole } from "@prisma/client";
 
 export interface AuthRequest extends Request {
   user?: {
@@ -9,6 +9,8 @@ export interface AuthRequest extends Request {
     email: string;
     role: UserRole;
   };
+  /** Set by requireOrg (org.middleware.ts) on every business route. */
+  org?: { id: number; membershipId: number; role: OrgRole; buildingIds: number[] | null };
 }
 
 export const authenticate = (req: AuthRequest, _res: Response, next: NextFunction) => {

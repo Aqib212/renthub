@@ -19,6 +19,16 @@ import type { AuthResponse, AuthTokens } from "./auth.types";
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCK_DURATION_MINUTES = 30;
 
+/** Workspaces the user belongs to, for the organisation switcher. */
+export async function membershipsOf(userId: bigint | number) {
+  const rows = await prisma.membership.findMany({
+    where: { userId, isActive: true },
+    include: { org: { select: { name: true } } },
+    orderBy: { createdAt: "asc" },
+  });
+  return rows.map((m) => ({ orgId: String(m.orgId), orgName: m.org.name, role: m.role }));
+}
+
 export class AuthService {
   private generateTokens(userId: string, email: string, role: string): AuthTokens {
     const payload = { userId, email, role };
@@ -50,10 +60,16 @@ export class AuthService {
         password: hashedPassword,
         firstName: input.firstName,
         lastName: input.lastName,
-        role: input.role,
         otp: generateOtp(),
         otpExpiresAt: new Date(Date.now() + env.otp.expiresInMinutes * 60 * 1000),
         otpPurpose: "EMAIL_VERIFICATION",
+        // every self-registered user owns a new workspace; staff are invited into existing ones
+        memberships: {
+          create: {
+            role: "OWNER",
+            org: { create: { name: input.orgName ?? `${input.firstName} ${input.lastName}`, settings: { dueDay: 10, noticeMonths: 2 } } },
+          },
+        },
       },
     });
 
@@ -77,6 +93,7 @@ export class AuthService {
         status: user.status,
         emailVerified: user.emailVerified,
         avatar: user.avatar,
+        memberships: await membershipsOf(user.id),
       },
       tokens,
     };
@@ -146,6 +163,7 @@ export class AuthService {
         status: user.status,
         emailVerified: user.emailVerified,
         avatar: user.avatar,
+        memberships: await membershipsOf(user.id),
       },
       tokens,
     };
@@ -336,7 +354,7 @@ export class AuthService {
       throw new NotFoundError("User not found");
     }
 
-    return user;
+    return { ...user, memberships: await membershipsOf(user.id) };
   }
 
   async updateProfile(userId: string, input: UpdateProfileInput) {

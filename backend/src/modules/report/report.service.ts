@@ -1,6 +1,7 @@
 import PDFDocument from "pdfkit";
 import ExcelJS from "exceljs";
 import { prisma } from "../../shared/prisma";
+import { LIVE } from "../bill-type/bill-type.service";
 import { toNumberId } from "../../shared/utils/helpers";
 
 function toNumber(val: unknown): number {
@@ -11,13 +12,13 @@ function toNumber(val: unknown): number {
 }
 
 export class ReportService {
-  async getReportData(ownerId: string, type: string, query: { dateFrom?: string; dateTo?: string; month?: number; year?: number; buildingId?: number }) {
+  async getReportData(orgId: string, type: string, query: { dateFrom?: string; dateTo?: string; month?: number; year?: number; buildingId?: number }) {
     switch (type) {
-      case "income_expense": return this.incomeExpense(ownerId, query);
-      case "collection": return this.collection(ownerId, query);
-      case "rent_roll": return this.rentRoll(ownerId, query);
-      case "outstanding": return this.outstanding(ownerId, query);
-      case "expense_detail": return this.expenseDetail(ownerId, query);
+      case "income_expense": return this.incomeExpense(orgId, query);
+      case "collection": return this.collection(orgId, query);
+      case "rent_roll": return this.rentRoll(orgId, query);
+      case "outstanding": return this.outstanding(orgId, query);
+      case "expense_detail": return this.expenseDetail(orgId, query);
       default: return [];
     }
   }
@@ -29,19 +30,19 @@ export class ReportService {
     return Object.keys(filter).length ? filter : undefined;
   }
 
-  private async incomeExpense(ownerId: string, query: any) {
+  private async incomeExpense(orgId: string, query: any) {
     const dateFilter = this.dateFilter(query);
     const buildingFilter = query.buildingId ? { buildingId: toNumberId(query.buildingId) } : {};
     const paymentBuildingFilter = query.buildingId ? { invoice: { flat: { floor: { buildingId: toNumberId(query.buildingId) } } } } : {};
 
     const [incomeResult, expenseResult] = await Promise.all([
       prisma.payment.aggregate({
-        where: { ownerId: toNumberId(ownerId), ...(dateFilter ? { date: dateFilter } : {}), ...paymentBuildingFilter },
+        where: { orgId: toNumberId(orgId), ...(dateFilter ? { date: dateFilter } : {}), ...paymentBuildingFilter },
         _sum: { amount: true },
         _count: true,
       }),
       prisma.expense.aggregate({
-        where: { ownerId: toNumberId(ownerId), ...(dateFilter ? { date: dateFilter } : {}), ...buildingFilter },
+        where: { orgId: toNumberId(orgId), ...(dateFilter ? { date: dateFilter } : {}), ...buildingFilter },
         _sum: { amount: true },
         _count: true,
       }),
@@ -53,7 +54,7 @@ export class ReportService {
 
     const categoryBreakdown = await prisma.expense.groupBy({
       by: ["category"],
-      where: { ownerId: toNumberId(ownerId), ...(dateFilter ? { date: dateFilter } : {}), ...buildingFilter },
+      where: { orgId: toNumberId(orgId), ...(dateFilter ? { date: dateFilter } : {}), ...buildingFilter },
       _sum: { amount: true },
     });
 
@@ -74,7 +75,7 @@ export class ReportService {
     };
   }
 
-  private async collection(ownerId: string, query: any) {
+  private async collection(orgId: string, query: any) {
     const dateFilter = this.dateFilter(query);
     const buildingFilter = query.buildingId ? { flat: { floor: { buildingId: toNumberId(query.buildingId) } } } : {};
     const paymentBuildingFilter = query.buildingId ? { invoice: buildingFilter } : {};
@@ -83,21 +84,21 @@ export class ReportService {
     const [byMethod, totalAgg, invoicesAgg, outstandingAgg] = await Promise.all([
       prisma.payment.groupBy({
         by: ["method"],
-        where: { ownerId: toNumberId(ownerId), ...whereDate },
+        where: { orgId: toNumberId(orgId), ...whereDate },
         _sum: { amount: true },
         _count: true,
       }),
       prisma.payment.aggregate({
-        where: { ownerId: toNumberId(ownerId), ...whereDate },
+        where: { orgId: toNumberId(orgId), ...whereDate },
         _sum: { amount: true },
         _count: true,
       }),
       prisma.invoice.aggregate({
-        where: { ownerId: toNumberId(ownerId), ...buildingFilter, ...(query.dateFrom ? { createdAt: { gte: new Date(query.dateFrom) } } : {}) },
+        where: { orgId: toNumberId(orgId), ...buildingFilter, ...(query.dateFrom ? { createdAt: { gte: new Date(query.dateFrom) } } : {}) },
         _sum: { totalAmount: true, paidAmount: true },
       }),
       prisma.invoice.aggregate({
-        where: { ownerId: toNumberId(ownerId), carriedForward: false, ...buildingFilter },
+        where: { orgId: toNumberId(orgId), carriedForward: false, ...buildingFilter },
         _sum: { dueAmount: true },
       }),
     ]);
@@ -120,14 +121,14 @@ export class ReportService {
     };
   }
 
-  private async rentRoll(ownerId: string, query: any) {
+  private async rentRoll(orgId: string, query: any) {
     const buildingFilter = query.buildingId ? { buildingId: toNumberId(query.buildingId) } : {};
     const dateFilter = query.month && query.year ? { month: query.month, year: query.year } : {};
 
     const flats = await prisma.flat.findMany({
-      where: { floor: { building: { ownerId: toNumberId(ownerId), ...(query.buildingId ? { id: toNumberId(query.buildingId) } : {}) } } },
+      where: { floor: { building: { orgId: toNumberId(orgId), ...(query.buildingId ? { id: toNumberId(query.buildingId) } : {}) } } },
       include: {
-        tenants: { where: { status: "ACTIVE" }, take: 1 },
+        asset: { select: { agreements: { where: LIVE, take: 1, orderBy: { startDate: "desc" }, include: { tenant: true, revisions: { orderBy: { effectiveFrom: "desc" } } } } } },
         floor: { select: { building: { select: { name: true } } } },
         invoices: {
           where: Object.keys(dateFilter).length ? dateFilter : {},
@@ -138,26 +139,33 @@ export class ReportService {
       orderBy: { name: "asc" },
     });
 
+    // contracted rent from the running agreement (latest revision that has started); asking rent when vacant
+    const now = new Date();
+    const rentOf = (f: (typeof flats)[number]) => {
+      const a = f.asset.agreements[0];
+      if (!a) return toNumber(f.rent);
+      return toNumber(a.revisions.find((r) => r.effectiveFrom <= now)?.rate ?? a.rate);
+    };
     return {
       type: "rent_roll",
       period: dateFilter.month ? `${dateFilter.month}/${dateFilter.year}` : null,
-      totalRent: flats.reduce((s, f) => s + toNumber(f.rent), 0),
+      totalRent: flats.reduce((s, f) => s + rentOf(f), 0),
       flats: flats.map((f) => ({
         flatName: f.name,
         flatNumber: f.flatNumber,
         buildingName: f.floor.building.name,
         status: f.status,
-        tenantName: f.tenants[0] ? `${f.tenants[0].firstName} ${f.tenants[0].lastName}` : null,
-        rent: toNumber(f.rent),
+        tenantName: f.asset.agreements[0] ? `${f.asset.agreements[0].tenant.firstName} ${f.asset.agreements[0].tenant.lastName}` : null,
+        rent: rentOf(f),
         invoiceStatus: f.invoices[0]?.status || null,
         dueAmount: f.invoices[0] ? toNumber(f.invoices[0].dueAmount) : null,
       })),
     };
   }
 
-  private async outstanding(ownerId: string, query: any) {
+  private async outstanding(orgId: string, query: any) {
     // carried-forward invoices are already counted in the later invoice's previousDue
-    const where: any = { ownerId: toNumberId(ownerId), carriedForward: false, status: { in: ["PENDING", "PARTIALLY_PAID", "OVERDUE"] } };
+    const where: any = { orgId: toNumberId(orgId), carriedForward: false, status: { in: ["PENDING", "PARTIALLY_PAID", "OVERDUE"] } };
     if (query.month) where.month = query.month;
     if (query.year) where.year = query.year;
     if (query.buildingId) where.flat = { floor: { buildingId: toNumberId(query.buildingId) } };
@@ -198,18 +206,18 @@ export class ReportService {
     };
   }
 
-  private async expenseDetail(ownerId: string, query: any) {
+  private async expenseDetail(orgId: string, query: any) {
     const dateFilter = this.dateFilter(query);
     const buildingFilter = query.buildingId ? { buildingId: toNumberId(query.buildingId) } : {};
 
     const [expenses, aggregate] = await Promise.all([
       prisma.expense.findMany({
-        where: { ownerId: toNumberId(ownerId), ...(dateFilter ? { date: dateFilter } : {}), ...buildingFilter },
+        where: { orgId: toNumberId(orgId), ...(dateFilter ? { date: dateFilter } : {}), ...buildingFilter },
         orderBy: { date: "desc" },
         include: { building: { select: { name: true } } },
       }),
       prisma.expense.aggregate({
-        where: { ownerId: toNumberId(ownerId), ...(dateFilter ? { date: dateFilter } : {}), ...buildingFilter },
+        where: { orgId: toNumberId(orgId), ...(dateFilter ? { date: dateFilter } : {}), ...buildingFilter },
         _sum: { amount: true },
         _count: true,
       }),
@@ -239,8 +247,8 @@ export class ReportService {
 
   // ─── PDF Generation ──────────────────────────────────────────────
 
-  async generatePDF(ownerId: string, type: string, query: any): Promise<Buffer> {
-    const data: any = await this.getReportData(ownerId, type, query);
+  async generatePDF(orgId: string, type: string, query: any): Promise<Buffer> {
+    const data: any = await this.getReportData(orgId, type, query);
     const doc = new PDFDocument({ margin: 40, size: "A4" });
     const chunks: Buffer[] = [];
     doc.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -311,8 +319,8 @@ export class ReportService {
 
   // ─── Excel Generation ─────────────────────────────────────────────
 
-  async generateExcel(ownerId: string, type: string, query: any): Promise<Buffer> {
-    const data: any = await this.getReportData(ownerId, type, query);
+  async generateExcel(orgId: string, type: string, query: any): Promise<Buffer> {
+    const data: any = await this.getReportData(orgId, type, query);
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet(type.replace(/_/g, " ").toUpperCase());
 
