@@ -20,6 +20,11 @@ import invoiceRoutes, { publicInvoiceRouter } from "./modules/invoice/invoice.ro
 import paymentRoutes, { publicReceiptRouter } from "./modules/payment/payment.routes";
 import expenseRoutes from "./modules/expense/expense.routes";
 import reportRoutes from "./modules/report/report.routes";
+import maintenanceRoutes from "./modules/maintenance/maintenance.routes";
+import documentRoutes from "./modules/document/document.routes";
+import auditRoutes from "./modules/audit/audit.routes";
+import paymentClaimRoutes from "./modules/payment-claim/payment-claim.routes";
+import portalRoutes from "./modules/portal/portal.routes";
 import { startScheduledTasks } from "./scheduledTasks";
 
 const app = express();
@@ -51,6 +56,11 @@ app.use("/api/v1/invoices", invoiceRoutes);
 app.use("/api/v1/payments", paymentRoutes);
 app.use("/api/v1/expenses", expenseRoutes);
 app.use("/api/v1/reports", reportRoutes);
+app.use("/api/v1/maintenance", maintenanceRoutes);
+app.use("/api/v1/documents", documentRoutes);
+app.use("/api/v1/audit-logs", auditRoutes);
+app.use("/api/v1/payment-claims", paymentClaimRoutes);
+app.use("/api/v1/portal", globalRateLimiter, portalRoutes);
 
 app.get("/api/v1/health", (_req, res) => {
   res.json({ success: true, message: "Server is running", timestamp: new Date().toISOString() });

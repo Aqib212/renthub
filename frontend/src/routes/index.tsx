@@ -33,6 +33,16 @@ import { MoveOutPage } from "@/features/agreements/MoveOutPage";
 import { UnitsBoardPage } from "@/features/units/UnitsBoardPage";
 import { TenantProfilePage } from "@/features/tenants/TenantProfilePage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
+import { AgreementDeedPage } from "@/features/agreements/AgreementDeedPage";
+import { MaintenancePage } from "@/features/maintenance/MaintenancePage";
+import { ActivityPage } from "@/features/admin/ActivityPage";
+import { PortalLayout } from "@/features/portal/PortalLayout";
+import { PortalLoginPage } from "@/features/portal/PortalLoginPage";
+import { PortalHomePage } from "@/features/portal/PortalHomePage";
+import { PortalBillsPage } from "@/features/portal/PortalBillsPage";
+import { PortalPayPage } from "@/features/portal/PortalPayPage";
+import { PortalAgreementPage } from "@/features/portal/PortalAgreementPage";
+import { PortalRepairsPage } from "@/features/portal/PortalRepairsPage";
 import { DashboardLayout } from "@/layouts/DashboardLayout";
 import { ProtectedRoute, PublicRoute } from "./ProtectedRoute";
 
@@ -48,6 +58,17 @@ export const AppRouter = () => {
         <Route path="/i/:token" element={<PublicInvoicePage />} />
         <Route path="/r/:token" element={<PublicReceiptPage />} />
 
+        {/* tenant portal: its own login (phone + SMS code) and layout */}
+        <Route path="/portal/login" element={<PortalLoginPage />} />
+        <Route path="/portal" element={<PortalLayout />}>
+          <Route index element={<PortalHomePage />} />
+          <Route path="bills" element={<PortalBillsPage />} />
+          <Route path="pay/:agreementId/:invoiceId" element={<PortalPayPage />} />
+          <Route path="agreement" element={<PortalAgreementPage />} />
+          <Route path="agreement/:id" element={<PortalAgreementPage />} />
+          <Route path="repairs" element={<PortalRepairsPage />} />
+        </Route>
+
         <Route element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/buildings" element={<BuildingListPage />} />
@@ -62,6 +83,9 @@ export const AppRouter = () => {
           <Route path="/agreements/new" element={<AgreementNewPage />} />
           <Route path="/agreements/:id" element={<AgreementDetailPage />} />
           <Route path="/agreements/:id/move-out" element={<MoveOutPage />} />
+          <Route path="/agreements/:id/deed" element={<AgreementDeedPage />} />
+          <Route path="/maintenance" element={<MaintenancePage />} />
+          <Route path="/activity" element={<ActivityPage />} />
           <Route path="/buildings/:buildingId/floors/:floorId/flats/:flatId/tenants" element={<TenantListPage />} />
           <Route path="/billing" element={<MonthlyBillingPage />} />
           <Route path="/bill-types" element={<BillTypesPage />} />

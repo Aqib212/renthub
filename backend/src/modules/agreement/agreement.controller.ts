@@ -50,3 +50,20 @@ export const remove = asyncHandler(async (req: AuthRequest, res: Response) => {
   await service.remove(req.org!.id, req.params.id);
   ok(res, "Draft deleted", null);
 });
+
+export const update = asyncHandler(async (req: AuthRequest, res: Response) => {
+  ok(res, "Agreement updated", await service.update(req.org!.id, req.params.id, req.body));
+});
+
+export const noticeRequests = asyncHandler(async (req: AuthRequest, res: Response) => {
+  ok(res, "Notice requests", await service.noticeRequests(req.org!.id, req.query.status ? String(req.query.status) : undefined));
+});
+
+export const acceptNotice = asyncHandler(async (req: AuthRequest, res: Response) => {
+  ok(res, "Notice accepted", await service.acceptNotice(req.org!.id, req.params.id, req.params.rid, req.org!.membershipId));
+});
+
+export const declineNotice = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 255) || null : null;
+  ok(res, "Notice declined", await service.declineNotice(req.org!.id, req.params.id, req.params.rid, req.org!.membershipId, note));
+});

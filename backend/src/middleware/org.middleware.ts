@@ -3,6 +3,7 @@ import { prisma } from "../shared/prisma";
 import { ForbiddenError, UnauthorizedError } from "../shared/utils/errors";
 import { toNumberId } from "../shared/utils/helpers";
 import { can, type Action } from "../shared/permissions";
+import { actorStore } from "../shared/audit";
 import type { AuthRequest } from "./auth.middleware";
 
 export type OrgRequest = AuthRequest;
@@ -32,7 +33,7 @@ export const requireOrg = async (req: OrgRequest, _res: Response, next: NextFunc
       role: m.role,
       buildingIds: Array.isArray(m.buildingIds) ? (m.buildingIds as unknown[]).map(Number) : null,
     };
-    next();
+    actorStore.run({ orgId: req.org.id, userId: Number(userId), membershipId: req.org.membershipId, ip: req.ip, userAgent: req.get("user-agent") }, next);
   } catch (e) {
     next(e);
   }

@@ -3,6 +3,7 @@ import ExcelJS from "exceljs";
 import { prisma } from "../../shared/prisma";
 import { LIVE } from "../bill-type/bill-type.service";
 import { toNumberId } from "../../shared/utils/helpers";
+import { daysBetween, depositBalance, fiscalYearRange, monthPeriod, utcDate, vacantDays } from "../../shared/utils/rental";
 
 function toNumber(val: unknown): number {
   if (val === null || val === undefined) return 0;
@@ -12,13 +13,17 @@ function toNumber(val: unknown): number {
 }
 
 export class ReportService {
-  async getReportData(orgId: string, type: string, query: { dateFrom?: string; dateTo?: string; month?: number; year?: number; buildingId?: number }) {
+  async getReportData(orgId: string, type: string, query: { dateFrom?: string; dateTo?: string; month?: number; year?: number; buildingId?: number; fiscalYear?: number }) {
     switch (type) {
       case "income_expense": return this.incomeExpense(orgId, query);
       case "collection": return this.collection(orgId, query);
       case "rent_roll": return this.rentRoll(orgId, query);
       case "outstanding": return this.outstanding(orgId, query);
       case "expense_detail": return this.expenseDetail(orgId, query);
+      case "deposit_liability": return this.depositLiability(orgId, query);
+      case "vacancy_loss": return this.vacancyLoss(orgId, query);
+      case "collection_by_collector": return this.collectionByCollector(orgId, query);
+      case "tax_statement": return this.taxStatement(orgId, query);
       default: return [];
     }
   }
@@ -245,6 +250,215 @@ export class ReportService {
     };
   }
 
+  // ─── Phase 4 reports ─────────────────────────────────────────────
+
+  /** Deposits held per agreement (money owed back to tenants), from the deposit ledger. */
+  private async depositLiability(orgId: string, query: any) {
+    const agreements = await prisma.agreement.findMany({
+      where: {
+        orgId: toNumberId(orgId),
+        status: { not: "DRAFT" },
+        deposits: { some: {} },
+        ...(query.buildingId ? { asset: { unit: { floor: { buildingId: toNumberId(query.buildingId) } } } } : {}),
+      },
+      include: {
+        deposits: { select: { type: true, amount: true } },
+        tenant: { select: { firstName: true, lastName: true } },
+        asset: { select: { unit: { select: { name: true, floor: { select: { building: { select: { name: true } } } } } } } },
+      },
+      orderBy: { startDate: "asc" },
+    });
+    const sumOf = (a: (typeof agreements)[number], t: string) => a.deposits.filter((d) => d.type === t).reduce((s, d) => s + toNumber(d.amount), 0);
+    const rows = agreements
+      .map((a) => ({
+        unit: a.asset.unit?.name ?? "—",
+        building: a.asset.unit?.floor.building.name ?? "—",
+        tenant: `${a.tenant.firstName} ${a.tenant.lastName}`,
+        status: a.status,
+        received: sumOf(a, "RECEIVED"),
+        adjusted: sumOf(a, "ADJUSTED"),
+        deducted: sumOf(a, "DEDUCTED_DAMAGE"),
+        refunded: sumOf(a, "REFUNDED"),
+        held: depositBalance(a.deposits.map((d) => ({ type: d.type, amount: toNumber(d.amount) }))),
+      }))
+      .filter((r) => r.held !== 0 || r.status !== "ENDED");
+    return {
+      type: "deposit_liability",
+      summary: { totalHeld: rows.reduce((s, r) => s + r.held, 0), agreements: rows.length },
+      rows,
+    };
+  }
+
+  /** Rent lost to empty units: vacant days in the range × asking rent per day of that month. */
+  private async vacancyLoss(orgId: string, query: any) {
+    const today = new Date();
+    const from = query.dateFrom ? new Date(`${query.dateFrom}T00:00:00Z`) : utcDate(today.getUTCFullYear(), 1, 1);
+    const to = query.dateTo ? new Date(`${query.dateTo}T00:00:00Z`) : utcDate(today.getUTCFullYear(), today.getUTCMonth() + 1, today.getUTCDate());
+    const flats = await prisma.flat.findMany({
+      where: { floor: { building: { orgId: toNumberId(orgId), ...(query.buildingId ? { id: toNumberId(query.buildingId) } : {}) } } },
+      include: {
+        floor: { select: { building: { select: { name: true } } } },
+        asset: { select: { agreements: { where: { status: { in: ["ACTIVE", "NOTICE", "ENDED"] } }, select: { startDate: true, endDate: true } } } },
+      },
+      orderBy: { name: "asc" },
+    });
+    const rows = flats.map((f) => {
+      // a unit added mid-range only counts from the day it was added
+      const created = utcDate(f.createdAt.getUTCFullYear(), f.createdAt.getUTCMonth() + 1, f.createdAt.getUTCDate());
+      let days = 0;
+      let loss = 0;
+      for (let m = utcDate(from.getUTCFullYear(), from.getUTCMonth() + 1, 1); m <= to; m = utcDate(m.getUTCFullYear(), m.getUTCMonth() + 2, 1)) {
+        const month = monthPeriod(m.getUTCMonth() + 1, m.getUTCFullYear());
+        const start = new Date(Math.max(month.start.getTime(), from.getTime(), created.getTime()));
+        const end = new Date(Math.min(month.end.getTime(), to.getTime()));
+        if (start > end) continue;
+        const v = vacantDays({ start, end }, f.asset.agreements);
+        days += v;
+        loss += (toNumber(f.rent) * v) / daysBetween(month.start, month.end);
+      }
+      return { unit: f.name, building: f.floor.building.name, status: f.status, askingRent: toNumber(f.rent), vacantDays: days, loss: Math.round(loss) };
+    }).filter((r) => r.vacantDays > 0);
+    return {
+      type: "vacancy_loss",
+      period: { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) },
+      summary: { totalLoss: rows.reduce((s, r) => s + r.loss, 0), vacantUnitDays: rows.reduce((s, r) => s + r.vacantDays, 0), unitsAffected: rows.length },
+      rows,
+    };
+  }
+
+  /** Money taken by each staff member, by method, and the cash they still hold. */
+  private async collectionByCollector(orgId: string, query: any) {
+    const dateFilter = this.dateFilter(query);
+    const oid = toNumberId(orgId);
+    const buildingFilter = query.buildingId ? { invoice: { flat: { floor: { buildingId: toNumberId(query.buildingId) } } } } : {};
+    const [groups, inHand, members] = await Promise.all([
+      prisma.payment.groupBy({
+        by: ["collectedById", "method"],
+        where: { orgId: oid, method: { not: "DEPOSIT" }, ...(dateFilter ? { date: dateFilter } : {}), ...buildingFilter },
+        _sum: { amount: true },
+        _count: true,
+      }),
+      prisma.payment.groupBy({
+        by: ["collectedById"],
+        where: { orgId: oid, method: "CASH", handoverId: null, collectedById: { not: null } },
+        _sum: { amount: true },
+      }),
+      prisma.membership.findMany({ where: { orgId: oid }, select: { id: true, role: true, user: { select: { firstName: true, lastName: true } } } }),
+    ]);
+    const nameOf = new Map(members.map((m) => [String(m.id), `${m.user.firstName} ${m.user.lastName} (${m.role.toLowerCase()})`]));
+    const hand = new Map(inHand.map((h) => [String(h.collectedById), toNumber(h._sum.amount)]));
+    const rows = groups
+      .map((g) => ({
+        collector: g.collectedById ? nameOf.get(String(g.collectedById)) ?? "Former member" : "Not recorded (before staff tracking)",
+        method: g.method,
+        payments: g._count,
+        amount: toNumber(g._sum.amount),
+        cashInHand: g.method === "CASH" && g.collectedById ? hand.get(String(g.collectedById)) ?? 0 : null,
+      }))
+      .sort((a, b) => a.collector.localeCompare(b.collector) || b.amount - a.amount);
+    return {
+      type: "collection_by_collector",
+      period: { from: query.dateFrom || null, to: query.dateTo || null },
+      summary: {
+        totalCollected: rows.reduce((s, r) => s + r.amount, 0),
+        payments: rows.reduce((s, r) => s + r.payments, 0),
+        cashWithStaff: [...hand.values()].reduce((s, v) => s + v, 0),
+      },
+      rows,
+    };
+  }
+
+  /**
+   * Yearly rent-income statement per building for the owner's tax return (income year 1 July – 30 June).
+   * Facts only (billed, received by channel, TDS, expenses); it is not tax advice.
+   */
+  private async taxStatement(orgId: string, query: any) {
+    const now = new Date();
+    const fy = query.fiscalYear ?? (now.getMonth() + 1 >= 7 ? now.getFullYear() : now.getFullYear() - 1);
+    const { start, end } = fiscalYearRange(fy);
+    const endExclusive = new Date(end.getTime() + 86_400_000);
+    const oid = toNumberId(orgId);
+    const inBuilding = query.buildingId ? { flat: { floor: { buildingId: toNumberId(query.buildingId) } } } : {};
+
+    const [invoices, payments, expenses, buildings] = await Promise.all([
+      prisma.invoice.findMany({
+        where: { orgId: oid, ...inBuilding, OR: [{ year: fy, month: { gte: 7 } }, { year: fy + 1, month: { lte: 6 } }] },
+        select: { rent: true, flat: { select: { floor: { select: { buildingId: true } } } } },
+      }),
+      prisma.payment.findMany({
+        where: { orgId: oid, date: { gte: start, lt: endExclusive }, ...(query.buildingId ? { invoice: inBuilding } : {}) },
+        select: { amount: true, method: true, invoice: { select: { agreement: { select: { bankOnly: true } }, flat: { select: { floor: { select: { buildingId: true } } } } } } },
+      }),
+      prisma.expense.findMany({
+        where: { orgId: oid, date: { gte: start, lt: endExclusive }, ...(query.buildingId ? { buildingId: toNumberId(query.buildingId) } : {}) },
+        select: { amount: true, category: true, buildingId: true },
+      }),
+      prisma.building.findMany({ where: { orgId: oid }, select: { id: true, name: true, holdingNumber: true } }),
+    ]);
+
+    const BANK = ["BANK", "CHEQUE"];
+    const MOBILE = ["BKASH", "NAGAD", "ROCKET"];
+    const blank = () => ({ rentBilled: 0, bank: 0, mobile: 0, cash: 0, tds: 0, deposit: 0, cashOnBankOnly: 0, expenses: 0, holdingTax: 0 });
+    const byBuilding = new Map<string, ReturnType<typeof blank>>();
+    const row = (id: unknown) => {
+      const k = id == null ? "none" : String(id);
+      if (!byBuilding.has(k)) byBuilding.set(k, blank());
+      return byBuilding.get(k)!;
+    };
+    for (const i of invoices) row(i.flat.floor.buildingId).rentBilled += toNumber(i.rent);
+    for (const p of payments) {
+      const r = row(p.invoice.flat.floor.buildingId);
+      const a = toNumber(p.amount);
+      if (BANK.includes(p.method)) r.bank += a;
+      else if (MOBILE.includes(p.method)) r.mobile += a;
+      else if (p.method === "CASH") {
+        r.cash += a;
+        if (p.invoice.agreement?.bankOnly) r.cashOnBankOnly += a;
+      } else if (p.method === "TDS") r.tds += a;
+      else if (p.method === "DEPOSIT") r.deposit += a;
+    }
+    for (const e of expenses) {
+      const r = row(e.buildingId);
+      if (e.category === "HOLDING_TAX") r.holdingTax += toNumber(e.amount);
+      else r.expenses += toNumber(e.amount);
+    }
+
+    const names = new Map(buildings.map((b) => [String(b.id), b]));
+    const round = (n: number) => Math.round(n * 100) / 100;
+    const rows = [...byBuilding.entries()].map(([k, r]) => ({
+      building: names.get(k)?.name ?? "General (no building)",
+      holding: names.get(k)?.holdingNumber ?? "",
+      rentBilled: round(r.rentBilled),
+      receivedBank: round(r.bank),
+      receivedMobile: round(r.mobile),
+      receivedCash: round(r.cash),
+      tdsWithheld: round(r.tds),
+      depositAdjusted: round(r.deposit),
+      totalReceived: round(r.bank + r.mobile + r.cash + r.tds + r.deposit),
+      cashOnBankOnly: round(r.cashOnBankOnly),
+      expenses: round(r.expenses),
+      holdingTax: round(r.holdingTax),
+    }));
+    const total = (k: keyof (typeof rows)[number]) => round(rows.reduce((s, r) => s + Number(r[k] || 0), 0));
+    return {
+      type: "tax_statement",
+      period: { from: start.toISOString().slice(0, 10), to: end.toISOString().slice(0, 10) },
+      summary: {
+        incomeYear: `${fy}-${String((fy + 1) % 100).padStart(2, "0")}`,
+        rentBilled: total("rentBilled"),
+        totalReceived: total("totalReceived"),
+        throughBank: round(total("receivedBank") + total("receivedMobile")),
+        receivedCash: total("receivedCash"),
+        tdsWithheld: total("tdsWithheld"),
+        cashOnBankOnly: total("cashOnBankOnly"),
+        expenses: total("expenses"),
+        holdingTax: total("holdingTax"),
+        note: "For your accountant. Figures from RentHub records; not tax advice.",
+      },
+      rows,
+    };
+  }
+
   // ─── PDF Generation ──────────────────────────────────────────────
 
   async generatePDF(orgId: string, type: string, query: any): Promise<Buffer> {
@@ -258,9 +472,9 @@ export class ReportService {
 
       doc.fontSize(18).text("RentHub Report", { align: "center" });
       doc.fontSize(10).text(`Report Type: ${type.replace(/_/g, " ").toUpperCase()}`, { align: "center" });
-      if (query.dateFrom || query.dateTo) {
-        doc.fontSize(9).text(`Period: ${query.dateFrom || "any"} to ${query.dateTo || "any"}`, { align: "center" });
-      }
+      const from = data.period?.from ?? query.dateFrom;
+      const to = data.period?.to ?? query.dateTo;
+      if (from || to) doc.fontSize(9).text(`Period: ${from || "any"} to ${to || "any"}`, { align: "center" });
       doc.moveDown(1);
 
       const printSummaryRow = (label: string, value: string | number) => {
@@ -326,9 +540,9 @@ export class ReportService {
 
     sheet.addRow(["RentHub Report"]);
     sheet.addRow([`Type: ${type.replace(/_/g, " ").toUpperCase()}`]);
-    if (query.dateFrom || query.dateTo) {
-      sheet.addRow([`Period: ${query.dateFrom || "any"} to ${query.dateTo || "any"}`]);
-    }
+    const from = data.period?.from ?? query.dateFrom;
+    const to = data.period?.to ?? query.dateTo;
+    if (from || to) sheet.addRow([`Period: ${from || "any"} to ${to || "any"}`]);
     sheet.addRow([]);
 
     if (data.summary) {
@@ -390,6 +604,11 @@ export class ReportService {
           due: inv.dueAmount,
           status: inv.status,
         }));
+      case "deposit_liability":
+      case "vacancy_loss":
+      case "collection_by_collector":
+      case "tax_statement":
+        return data.rows || [];
       case "expense_detail":
         return (data.expenses || []).map((e: any) => ({
           date: e.date ? new Date(e.date).toLocaleDateString() : "",

@@ -16,6 +16,26 @@ import { IncomeTrendChart } from "./components/Charts/IncomeTrendChart";
 import { VacancyRateChart } from "./components/Charts/VacancyRateChart";
 import { OutstandingRentChart } from "./components/Charts/OutstandingRentChart";
 import dayjs from "dayjs";
+import { Alert } from "@mui/material";
+import { useQuery } from "@tanstack/react-query";
+import { claimsApi } from "@/features/payments/components/ClaimsPanel";
+import { agreementApi } from "@/api/agreement";
+
+/** Things tenants sent from the portal that wait for staff. */
+const PortalInbox = () => {
+  const navigate = useNavigate();
+  const { data: claims = [] } = useQuery({ queryKey: ["payment-claims"], queryFn: claimsApi.pending });
+  const { data: notices = [] } = useQuery({ queryKey: ["notice-requests"], queryFn: () => agreementApi.noticeRequests() });
+  if (!claims.length && !notices.length) return null;
+  return (
+    <Alert severity="info" sx={{ mb: 2 }} action={<>
+      {claims.length > 0 && <Button color="inherit" size="small" onClick={() => navigate("/payments")}>Payments</Button>}
+      {notices.length > 0 && <Button color="inherit" size="small" onClick={() => navigate(`/agreements/${notices[0].agreementId}`)}>Notice</Button>}
+    </>}>
+      From the tenant portal: {claims.length} payment(s) to confirm{notices.length ? `, ${notices.length} move-out request(s)` : ""}.
+    </Alert>
+  );
+};
 
 export const DashboardPage = () => {
   const { data, isLoading, error } = useDashboard();
@@ -56,6 +76,7 @@ export const DashboardPage = () => {
           </>
         }
       />
+      <PortalInbox />
 
       <Grid container spacing={2} sx={{ mb: 2 }}>
         <Grid item xs={12} sm={6} lg={3}>

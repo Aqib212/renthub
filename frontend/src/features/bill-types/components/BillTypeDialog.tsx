@@ -1,14 +1,14 @@
 import { useState } from "react";
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, Stack, Typography, Box,
-  FormControlLabel, Switch, IconButton, InputAdornment, Alert, Grid, ButtonBase,
+  FormControlLabel, Switch, IconButton, InputAdornment, Alert, Grid, ButtonBase, MenuItem,
 } from "@mui/material";
 import { Close, Add, ElectricBolt } from "@mui/icons-material";
 import { LoadingButton } from "@mui/lab";
 import { useMutation } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { billTypeApi } from "@/api/billType";
-import { CALC_METHODS, type BillType, type CalcMethod, type Slabs } from "@/types/billType";
+import { CALC_METHODS, SPLIT_RULES, type BillType, type CalcMethod, type Slabs, type SplitRule } from "@/types/billType";
 import { BERC_RESIDENTIAL, calcCharge } from "@/utils/billing";
 import { apiError, formatBDT } from "@/utils/format";
 
@@ -32,6 +32,7 @@ export const BillTypeDialog = ({ billType, nextSortOrder, onClose, onSaved }: Pr
   const [vat, setVat] = useState(str(billType?.vatPercent));
   const [slabs, setSlabs] = useState<Slabs>(billType?.slabs ?? { steps: [] });
   const [appliesToAll, setAppliesToAll] = useState(billType?.appliesToAll ?? true);
+  const [split, setSplit] = useState<SplitRule>(billType?.split ?? "EQUAL");
 
   const save = useMutation({
     mutationFn: () => {
@@ -42,7 +43,8 @@ export const BillTypeDialog = ({ billType, nextSortOrder, onClose, onSaved }: Pr
         unitLabel: ["METERED", "SLAB"].includes(method) ? unitLabel || null : null,
         fixedCharge: ["METERED", "SLAB"].includes(method) ? toNum(fixedCharge) : null,
         demandChargePerKw: method === "SLAB" ? toNum(demand) : null,
-        vatPercent: method === "MANUAL" ? null : toNum(vat),
+        vatPercent: method === "MANUAL" || method === "SHARED" ? null : toNum(vat),
+        split: method === "SHARED" ? split : null,
         slabs: method === "SLAB" ? slabs : null,
         appliesToAll,
         ...(billType ? {} : { sortOrder: nextSortOrder }),
@@ -168,7 +170,14 @@ export const BillTypeDialog = ({ billType, nextSortOrder, onClose, onSaved }: Pr
             <TextField label="Meter rent / minimum charge" type="number" value={fixedCharge} onChange={(e) => setFixedCharge(e.target.value)} {...money} />
           )}
 
-          {method !== "MANUAL" && (
+          {method === "SHARED" && (
+            <TextField select label="Split the bill" value={split} onChange={(e) => setSplit(e.target.value as SplitRule)}
+              helperText="Enter the building's total on the Monthly billing page; each let unit gets its share.">
+              {SPLIT_RULES.map((s) => <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>)}
+            </TextField>
+          )}
+
+          {method !== "MANUAL" && method !== "SHARED" && (
             <TextField label="VAT" type="number" value={vat} onChange={(e) => setVat(e.target.value)}
               InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }} />
           )}

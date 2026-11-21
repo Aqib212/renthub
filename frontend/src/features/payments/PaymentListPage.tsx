@@ -16,6 +16,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import { Link } from "@mui/material";
 import { cashApi } from "@/api/collections";
+import { ClaimsPanel } from "./components/ClaimsPanel";
 import { useT } from "@/i18n";
 import { formatBDT } from "@/utils/format";
 export default function PaymentListPage() {
@@ -80,6 +81,8 @@ export default function PaymentListPage() {
           </Button>
         </>}
       />
+
+      <ClaimsPanel />
 
       <Paper sx={{ p: 2, mb: 2 }}>
         <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">

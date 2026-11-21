@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Box, Button, Card, CardContent, Grid, TextField, Typography } from "@mui/material";
+import { Box, Button, Card, CardContent, Grid, TextField, Typography, FormControlLabel, Switch } from "@mui/material";
 import toast from "react-hot-toast";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { orgApi } from "@/api/org";
@@ -8,18 +8,21 @@ import { authApi } from "@/api/client";
 import { useAuthStore } from "@/store/authStore";
 import { apiError } from "@/utils/format";
 
+const clauseList = (text: string) => text.split("\n").map((s) => s.trim()).filter(Boolean);
+
 export const SettingsPage = () => {
   const qc = useQueryClient();
   const setUser = useAuthStore((s) => s.setUser);
   const { data: org } = useQuery({ queryKey: ["org-current"], queryFn: orgApi.current });
-  const [form, setForm] = useState({ name: "", dueDay: 10, noticeMonths: 2 });
+  const [form, setForm] = useState({ name: "", dueDay: 10, noticeMonths: 2, clauses: "", portal: true, payInfo: "" });
 
   useEffect(() => {
-    if (org) setForm({ name: org.name, dueDay: org.settings.dueDay, noticeMonths: org.settings.noticeMonths });
+    if (org) setForm({ name: org.name, dueDay: org.settings.dueDay, noticeMonths: org.settings.noticeMonths, clauses: (org.settings.agreementClauses ?? []).join("\n"),
+      portal: org.settings.portal?.enabled !== false, payInfo: org.settings.payInfo ?? "" });
   }, [org]);
 
   const save = useMutation({
-    mutationFn: () => orgApi.update({ name: form.name, settings: { dueDay: form.dueDay, noticeMonths: form.noticeMonths } }),
+    mutationFn: () => orgApi.update({ name: form.name, settings: { dueDay: form.dueDay, noticeMonths: form.noticeMonths, agreementClauses: clauseList(form.clauses), portal: { enabled: form.portal }, payInfo: form.payInfo } }),
     onSuccess: async () => {
       toast.success("Settings saved");
       qc.invalidateQueries({ queryKey: ["org-current"] });
@@ -30,7 +33,9 @@ export const SettingsPage = () => {
     onError: (e) => toast.error(apiError(e)),
   });
 
-  const dirty = !!org && (form.name !== org.name || form.dueDay !== org.settings.dueDay || form.noticeMonths !== org.settings.noticeMonths);
+  const dirty = !!org && (form.name !== org.name || form.dueDay !== org.settings.dueDay || form.noticeMonths !== org.settings.noticeMonths
+    || clauseList(form.clauses).join("\n") !== (org.settings.agreementClauses ?? []).join("\n")
+    || form.portal !== (org.settings.portal?.enabled !== false) || form.payInfo !== (org.settings.payInfo ?? ""));
 
   return (
     <Box>
@@ -55,6 +60,22 @@ export const SettingsPage = () => {
                   onChange={(e) => setForm({ ...form, noticeMonths: Math.min(6, Math.max(1, Number(e.target.value) || 1)) })}
                 />
               </Box>
+              <TextField
+                label="Default extra conditions for new agreements" multiline minRows={3} value={form.clauses}
+                helperText="One per line. Copied into each new agreement deed after the standard DNCC conditions; editable per agreement."
+                onChange={(e) => setForm({ ...form, clauses: e.target.value })}
+              />
+              <Typography variant="h6" sx={{ fontSize: 17, mt: 1 }}>Tenant portal</Typography>
+              <FormControlLabel
+                control={<Switch checked={form.portal} onChange={(e) => setForm({ ...form, portal: e.target.checked })} />}
+                label="Tenants can log in at /portal with their phone number (SMS code) to see bills, receipts and report repairs"
+              />
+              <TextField
+                label="How tenants pay you" multiline minRows={2} value={form.payInfo}
+                placeholder={"bKash (personal): 01XXXXXXXXX\nDBBL A/C 123.456.789, Hasan Properties"}
+                helperText={'Shown in the portal next to "I have paid".'}
+                onChange={(e) => setForm({ ...form, payInfo: e.target.value })}
+              />
               <Box>
                 <Button variant="contained" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>Save</Button>
               </Box>

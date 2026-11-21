@@ -1,6 +1,6 @@
 // Pure bill calculation. Keep in sync with frontend/src/utils/billing.ts (same code, copied).
 
-export type CalcMethod = "FIXED" | "METERED" | "SLAB" | "PER_PERSON" | "MANUAL";
+export type CalcMethod = "FIXED" | "METERED" | "SLAB" | "PER_PERSON" | "MANUAL" | "SHARED";
 
 export interface SlabStep { from: number; to: number | null; rate: number }
 export interface Slabs { steps: SlabStep[]; lifeline?: { upTo: number; rate: number } | null }
@@ -129,4 +129,18 @@ export function calcCharge(bt: BillTypeCalc, ctx: ChargeContext = {}): ChargeRes
   const total = base * (1 + vat / 100);
   if (vat) detail += ` + VAT ${vat}%`;
   return { amount: r2(total), quantity, rate: bt.calcMethod === "SLAB" ? null : rate, detail };
+}
+
+export type SplitRule = "EQUAL" | "PER_PERSON" | "PER_SQFT";
+
+/**
+ * Split a building bill by weight (1 each for EQUAL, people for PER_PERSON, sq ft for PER_SQFT).
+ * Whole taka per share; the rounding remainder goes on the last share so shares add up to the total.
+ */
+export function splitShares(total: number, weights: number[]): number[] {
+  const sum = weights.reduce((s, w) => s + w, 0);
+  if (!weights.length || sum <= 0) throw new Error("Nothing to split the bill across");
+  const shares = weights.map((w) => Math.round((total * w) / sum));
+  shares[shares.length - 1] = r2(total - shares.slice(0, -1).reduce((s, x) => s + x, 0));
+  return shares;
 }

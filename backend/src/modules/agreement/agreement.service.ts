@@ -6,7 +6,10 @@ import { depositBalance, ruleWarnings, settle } from "../../shared/utils/rental"
 import { LIVE, rentFor } from "../bill-type/bill-type.service";
 import { settingsOf } from "../org/org.service";
 import { InvoiceService, recalculateInvoice } from "../invoice/invoice.service";
-import type { CreateAgreementInput, DepositInput, EndInput, NoticeInput, RevisionInput } from "./agreement.validation";
+import type { CreateAgreementInput, DepositInput, EndInput, NoticeInput, RevisionInput, UpdateAgreementInput } from "./agreement.validation";
+import { audit } from "../../shared/audit";
+import { enqueue } from "../notification/notification.service";
+import { env } from "../../config/env";
 
 type Tx = Prisma.TransactionClient;
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -25,6 +28,7 @@ const detailInclude = {
   tenant: true,
   revisions: { orderBy: { effectiveFrom: "asc" } },
   deposits: { orderBy: [{ date: "asc" }, { id: "asc" }] },
+  notices: { where: { status: "PENDING" }, select: { id: true, noticeDate: true, moveOutDate: true, reason: true, createdAt: true } },
   invoices: {
     orderBy: { periodStart: "desc" },
     select: { id: true, month: true, year: true, totalAmount: true, paidAmount: true, dueAmount: true, status: true, carriedForward: true },
@@ -107,10 +111,13 @@ export class AgreementService {
           tdsPercent: input.tdsPercent ?? 0,
           bankOnly: rate > BANK_ONLY_ABOVE,
           status: input.activate ? "ACTIVE" : "DRAFT",
+          // the org's default extra deed clauses, editable per agreement afterwards
+          terms: settings.agreementClauses.length ? { clauses: settings.agreementClauses } : undefined,
           ...(input.deposit ? { deposits: { create: { type: "RECEIVED", amount: input.deposit, date: startDate, note: "Received at signing" } } } : {}),
         },
       });
       if (input.activate) await syncUnitStatus(flat.assetId, tx);
+      await audit(tx, "agreement.create", "Agreement", a.id, { unit: flat.name, rate, status: a.status, deposit: input.deposit ?? 0 });
       return a;
     });
 
@@ -129,6 +136,7 @@ export class AgreementService {
       await this.assertFree(tx, a.assetId, a.startDate);
       await tx.agreement.update({ where: { id: a.id }, data: { status: "ACTIVE" } });
       await syncUnitStatus(a.assetId, tx);
+      await audit(tx, "agreement.activate", "Agreement", a.id);
     });
     return this.get(orgId, id);
   }
@@ -144,17 +152,21 @@ export class AgreementService {
       revisions: a.revisions.map((r) => ({ effectiveFrom: r.effectiveFrom, rate: Number(r.rate) })),
       newRevision: { effectiveFrom, rate: input.rate },
     });
-    await prisma.$transaction([
-      prisma.rateRevision.create({ data: { agreementId: a.id, effectiveFrom, rate: input.rate, reason: input.reason } }),
-      prisma.agreement.update({ where: { id: a.id }, data: { bankOnly: Math.max(input.rate, Number(a.rate)) > BANK_ONLY_ABOVE } }),
-    ]);
+    await prisma.$transaction(async (tx) => {
+      await tx.rateRevision.create({ data: { agreementId: a.id, effectiveFrom, rate: input.rate, reason: input.reason } });
+      await tx.agreement.update({ where: { id: a.id }, data: { bankOnly: Math.max(input.rate, Number(a.rate)) > BANK_ONLY_ABOVE } });
+      await audit(tx, "agreement.revision", "Agreement", a.id, { from: current, to: input.rate, effectiveFrom: input.effectiveFrom, reason: input.reason ?? null });
+    });
     return { agreement: await this.get(orgId, id), warnings };
   }
 
   async addDeposit(orgId: number, id: string, input: DepositInput) {
     const a = await this.own(orgId, id);
     if (input.type !== "RECEIVED" && input.amount > ledger(a.deposits)) throw new ValidationError("More than the deposit held");
-    await prisma.depositEntry.create({ data: { agreementId: a.id, type: input.type, amount: input.amount, date: day(input.date), note: input.note } });
+    await prisma.$transaction(async (tx) => {
+      await tx.depositEntry.create({ data: { agreementId: a.id, type: input.type, amount: input.amount, date: day(input.date), note: input.note } });
+      await audit(tx, "agreement.deposit", "Agreement", a.id, { type: input.type, amount: input.amount, date: input.date });
+    });
     const agreement = await this.get(orgId, id);
     return { agreement, warnings: ruleWarnings({ rate: Number(agreement.currentRate), depositReceived: depositsReceived(agreement.deposits) }) };
   }
@@ -168,6 +180,7 @@ export class AgreementService {
     await prisma.$transaction(async (tx) => {
       await tx.agreement.update({ where: { id: a.id }, data: { status: "NOTICE", noticeDate, endDate } });
       await syncUnitStatus(a.assetId, tx);
+      await audit(tx, "agreement.notice", "Agreement", a.id, { noticeDate: input.noticeDate, endDate: endDate.toISOString().slice(0, 10) });
     });
     return { agreement: await this.get(orgId, id), warnings };
   }
@@ -238,11 +251,80 @@ export class AgreementService {
       if (input.refund && held > 0) {
         await tx.depositEntry.create({ data: { agreementId: a.id, type: "REFUNDED", amount: held, date, note: "Refunded at move-out" } });
       }
+      await audit(tx, "agreement.end", "Agreement", a.id, { endDate: input.endDate, deductions: input.deductions, refunded: input.refund && held > 0 ? held : 0 });
     });
 
     const agreement = await this.get(orgId, id);
     const due = r2(agreement.invoices.filter((i) => !i.carriedForward).reduce((s, i) => s + Number(i.dueAmount), 0));
     return { agreement, due, warnings };
+  }
+
+  /** Terms that can change on a running agreement: the TDS rate and the deed's extra clauses. */
+  async update(orgId: number, id: string, input: UpdateAgreementInput) {
+    const a = await this.own(orgId, id);
+    const terms = { ...((a.terms as Record<string, unknown>) ?? {}), ...(input.clauses && { clauses: input.clauses }) };
+    await prisma.$transaction(async (tx) => {
+      await tx.agreement.update({ where: { id: a.id }, data: { ...(input.tdsPercent !== undefined && { tdsPercent: input.tdsPercent }), terms } });
+      await audit(tx, "agreement.update", "Agreement", a.id, { tdsPercent: input.tdsPercent, clauses: input.clauses?.length });
+    });
+    return this.get(orgId, id);
+  }
+
+  /** Tenants' move-out requests from the portal. */
+  async noticeRequests(orgId: number, status?: string) {
+    return prisma.noticeRequest.findMany({
+      where: { orgId, ...(status ? { status: status as any } : {}) },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      include: { tenant: { select: { firstName: true, lastName: true } }, agreement: { select: { asset: { select: { unit: { select: { name: true } } } } } } },
+    });
+  }
+
+  /** Accept: the agreement goes on notice ending on the tenant's date; the tenant gets an SMS. */
+  async acceptNotice(orgId: number, id: string, requestId: string, reviewerId: number) {
+    const n = await this.pendingNotice(orgId, id, requestId);
+    const result = await this.giveNotice(orgId, id, { noticeDate: n.noticeDate.toISOString().slice(0, 10), endDate: n.moveOutDate.toISOString().slice(0, 10) });
+    await this.answerNotice(n, "ACCEPTED", reviewerId, null);
+    return { ...result, agreement: await this.get(orgId, id) };
+  }
+
+  async declineNotice(orgId: number, id: string, requestId: string, reviewerId: number, note: string | null) {
+    const n = await this.pendingNotice(orgId, id, requestId);
+    await this.answerNotice(n, "DECLINED", reviewerId, note);
+    return { agreement: await this.get(orgId, id), warnings: [] as string[] };
+  }
+
+  private async pendingNotice(orgId: number, id: string, requestId: string) {
+    const n = await prisma.noticeRequest.findFirst({ where: { id: toNumberId(requestId), agreementId: toNumberId(id), orgId } });
+    if (!n) throw new NotFoundError("Notice request not found");
+    if (n.status !== "PENDING") throw new ValidationError("This request was already answered");
+    return n;
+  }
+
+  private async answerNotice(n: { id: bigint; orgId: bigint; agreementId: bigint; tenantId: bigint; moveOutDate: Date }, status: "ACCEPTED" | "DECLINED", reviewerId: number, note: string | null) {
+    const a = await prisma.agreement.findUniqueOrThrow({
+      where: { id: n.agreementId },
+      include: { org: { select: { name: true } }, tenant: { select: { phone: true, lang: true } }, asset: { select: { unit: { select: { name: true, floor: { select: { building: { select: { name: true } } } } } } } } },
+    });
+    await prisma.$transaction(async (tx) => {
+      const { count } = await tx.noticeRequest.updateMany({ where: { id: n.id, status: "PENDING" }, data: { status, reviewedById: reviewerId, reviewNote: note, reviewedAt: new Date() } });
+      if (!count) throw new ValidationError("This request was already answered");
+      await enqueue(tx, {
+        orgId: Number(n.orgId),
+        template: status === "ACCEPTED" ? "NOTICE_ACCEPTED" : "NOTICE_DECLINED",
+        to: a.tenant.phone,
+        lang: a.tenant.lang,
+        data: {
+          org: a.org.name,
+          unit: a.asset.unit ? `${a.asset.unit.name}, ${a.asset.unit.floor.building.name}` : "",
+          amount: 0,
+          moveOutDate: n.moveOutDate.toISOString().slice(0, 10),
+          reason: note ?? undefined,
+          link: `${env.appUrl}/portal`,
+        },
+      });
+      await audit(tx, `notice.${status.toLowerCase()}`, "Agreement", n.agreementId, { moveOutDate: n.moveOutDate.toISOString().slice(0, 10), note });
+    });
   }
 
   async remove(orgId: number, id: string) {

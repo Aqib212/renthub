@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Grid, Link, MenuItem, Stack,
+  Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Grid, Link, MenuItem, Stack,
   Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography,
 } from "@mui/material";
 import toast from "react-hot-toast";
@@ -11,6 +11,8 @@ import { agreementApi, AGREEMENT_STATUS, DEPOSIT_LABEL, fmtDate, today, type Dep
 import { INVOICE_STATUS } from "@/theme";
 import { apiError, formatBDT } from "@/utils/format";
 import { WarningsAlert, toastWarnings } from "./WarningsAlert";
+import { DocumentsCard } from "@/components/DocumentsCard";
+import { useT } from "@/i18n";
 
 type DialogKind = "revision" | "deposit" | "notice" | null;
 
@@ -57,6 +59,7 @@ export const AgreementDetailPage = () => {
         </>}
         actions={<>
           <Button variant="outlined" component={RouterLink} to={`/tenants/${a.tenant.id}`}>Tenant profile</Button>
+          <Button variant="outlined" component={RouterLink} to={`/agreements/${a.id}/deed`}>Print agreement</Button>
           {a.status === "DRAFT" && <>
             <Button color="error" onClick={() => removeDraft.mutate()}>Delete draft</Button>
             <Button variant="contained" onClick={() => activate.mutate()} disabled={activate.isPending}>Start agreement</Button>
@@ -66,6 +69,14 @@ export const AgreementDetailPage = () => {
         </>}
       />
       <WarningsAlert warnings={warnings} />
+      {a.notices?.map((n) => (
+        <Alert key={n.id} severity="warning" sx={{ mb: 2 }} action={<>
+          <Button color="inherit" size="small" onClick={() => { const note = window.prompt("Message to the tenant (optional)") ?? undefined; agreementApi.declineNotice(a.id, n.id, note).then(done("Request declined; the tenant gets an SMS")).catch((e) => toast.error(apiError(e))); }}>Decline</Button>
+          <Button color="inherit" size="small" variant="outlined" onClick={() => agreementApi.acceptNotice(a.id, n.id).then(done("Notice accepted; the tenant gets an SMS")).catch((e) => toast.error(apiError(e)))}>Accept</Button>
+        </>}>
+          {a.tenant.firstName} asked in the portal to move out on <b>{fmtDate(n.moveOutDate)}</b> (sent {fmtDate(n.createdAt)}){n.reason ? `: “${n.reason}”` : ""}.
+        </Alert>
+      ))}
 
       <Grid container spacing={2.5}>
         <Grid item xs={12} md={5}>
@@ -81,6 +92,7 @@ export const AgreementDetailPage = () => {
                 <div><dt>Notice given</dt><dd>{fmtDate(a.noticeDate)}</dd></div>
                 <div><dt>Payment</dt><dd>{a.bankOnly ? "Through a bank (NBR)" : "Any method"}</dd></div>
                 <div><dt>Deposit held</dt><dd>{formatBDT(a.depositBalance)}</dd></div>
+                <div><dt>TDS withheld by tenant</dt><dd>{Number(a.tdsPercent) ? `${Number(a.tdsPercent)}% of rent` : "None"}</dd></div>
               </Box>
             </CardContent>
           </Card>
@@ -153,12 +165,44 @@ export const AgreementDetailPage = () => {
             </CardContent>
           </Card>
         </Grid>
+        <Grid item xs={12} md={6}>
+          <TermsCard key={a.id} id={a.id} tdsPercent={Number(a.tdsPercent)} clauses={a.terms?.clauses ?? []} />
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <DocumentsCard link={{ agreementId: a.id }} defaultKind="AGREEMENT" />
+        </Grid>
       </Grid>
 
       <RevisionDialog open={dialog === "revision"} onClose={() => setDialog(null)} onSave={(b) => agreementApi.addRevision(a.id, b).then(done("Revision added"))} currentRate={Number(a.currentRate)} />
       <DepositDialog open={dialog === "deposit"} onClose={() => setDialog(null)} onSave={(b) => agreementApi.addDeposit(a.id, b).then(done("Deposit entry saved"))} />
       <NoticeDialog open={dialog === "notice"} onClose={() => setDialog(null)} noticeDays={a.noticeDays} onSave={(b) => agreementApi.giveNotice(a.id, b).then(done("Notice recorded"))} />
     </Box>
+  );
+};
+
+/** TDS rate (company tenants) and the extra conditions printed on the agreement deed. */
+const TermsCard = ({ id, tdsPercent, clauses }: { id: number; tdsPercent: number; clauses: string[] }) => {
+  const { t } = useT();
+  const qc = useQueryClient();
+  const [tds, setTds] = useState(String(tdsPercent));
+  const [text, setText] = useState(clauses.join("\n"));
+  const save = useMutation({
+    mutationFn: () => agreementApi.update(id, { tdsPercent: Number(tds) || 0, clauses: text.split("\n").map((s) => s.trim()).filter(Boolean) }),
+    onSuccess: (a) => { toast.success(t("deed.clausesSaved")); qc.setQueryData(["agreement", String(id)], a); },
+    onError: (e) => toast.error(apiError(e)),
+  });
+  return (
+    <Card sx={{ height: "100%" }}>
+      <CardContent>
+        <Typography variant="h6" fontSize={17} sx={{ mb: 1.5 }}>{t("deed.clauses")}</Typography>
+        <Stack spacing={2}>
+          <TextField multiline minRows={3} value={text} onChange={(e) => setText(e.target.value)} helperText={t("deed.clausesHelp")} />
+          <TextField label="TDS the tenant withholds (%)" type="number" value={tds} onChange={(e) => setTds(e.target.value)}
+            helperText="Company tenants usually withhold 5% of the rent. Check with your accountant." inputProps={{ min: 0, max: 30, step: 0.5 }} sx={{ maxWidth: 280 }} />
+          <Button variant="outlined" sx={{ alignSelf: "flex-start" }} disabled={save.isPending} onClick={() => save.mutate()}>Save</Button>
+        </Stack>
+      </CardContent>
+    </Card>
   );
 };
 

@@ -9,7 +9,8 @@ const slabsSchema = z.object({
 
 export const billTypeSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(100),
-  calcMethod: z.enum(["FIXED", "METERED", "SLAB", "PER_PERSON", "MANUAL"]),
+  calcMethod: z.enum(["FIXED", "METERED", "SLAB", "PER_PERSON", "MANUAL", "SHARED"]),
+  split: z.enum(["EQUAL", "PER_PERSON", "PER_SQFT"]).nullable().optional(),
   rate: money,
   unitLabel: z.string().max(20).nullable().optional(),
   slabs: slabsSchema.nullable().optional(),
@@ -50,6 +51,14 @@ export const saveEntriesSchema = entriesQuerySchema.extend({
   })),
 });
 
+export const buildingBillSchema = entriesQuerySchema.extend({
+  buildingId: z.number().int().positive(),
+  billTypeId: z.number().int().positive(),
+  total: z.number().positive().max(10_000_000),
+  note: z.string().max(255).nullable().optional(),
+});
+
+export type BuildingBillInput = z.infer<typeof buildingBillSchema>;
 export type BillTypeInput = z.infer<typeof billTypeSchema>;
 export type FlatChargesInput = z.infer<typeof flatChargesSchema>;
 export type SaveEntriesInput = z.infer<typeof saveEntriesSchema>;

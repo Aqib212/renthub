@@ -10,14 +10,17 @@ export const ACTIONS = [
   "staff:manage",
   "settings:write",
   "cash:handover", // receive cash from a collector
+  "maintenance:write",
+  "document:write", // upload and delete files in the vault
+  "audit:read",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
 const ALLOWED: Record<OrgRole, readonly Action[]> = {
   OWNER: ACTIONS,
-  MANAGER: ["property:write", "billing:write", "payment:write", "expense:write", "report:read", "cash:handover"],
+  MANAGER: ["property:write", "billing:write", "payment:write", "expense:write", "report:read", "cash:handover", "maintenance:write", "document:write"],
   ACCOUNTANT: ["payment:write", "expense:write", "report:read"],
-  CARETAKER: ["payment:write"],
+  CARETAKER: ["payment:write", "maintenance:write"],
 };
 
 export const can = (role: OrgRole, action: Action) => ALLOWED[role].includes(action);

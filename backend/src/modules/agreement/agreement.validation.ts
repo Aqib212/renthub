@@ -31,6 +31,12 @@ export const createAgreementSchema = z
   })
   .refine((v) => v.tenantId || v.tenant, { message: "Choose a tenant or enter one", path: ["tenantId"] });
 
+export const updateAgreementSchema = z.object({
+  tdsPercent: z.coerce.number().min(0).max(30).optional(),
+  clauses: z.array(z.string().trim().min(1).max(1000)).max(30).optional(),
+});
+export type UpdateAgreementInput = z.infer<typeof updateAgreementSchema>;
+
 export const revisionSchema = z.object({ effectiveFrom: date, rate: z.coerce.number().positive(), reason: z.string().max(255).optional() });
 
 export const depositSchema = z.object({

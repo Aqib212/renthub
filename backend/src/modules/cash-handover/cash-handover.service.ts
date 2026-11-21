@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { prisma } from "../../shared/prisma";
+import { audit } from "../../shared/audit";
 import { NotFoundError, ValidationError } from "../../shared/utils/errors";
 
 export const handoverSchema = z.object({
@@ -73,6 +74,7 @@ export class CashHandoverService {
       // the guard in the where clause makes a concurrent second handover of the same payments a no-op
       const { count } = await tx.payment.updateMany({ where: { id: { in: input.paymentIds }, handoverId: null }, data: { handoverId: h.id } });
       if (count !== payments.length) throw new ValidationError("Some payments were handed over at the same time; try again");
+      await audit(tx, "cash.handover", "CashHandover", h.id, { fromMembershipId: input.fromMembershipId, amount, payments: payments.length });
       return h;
     });
   }

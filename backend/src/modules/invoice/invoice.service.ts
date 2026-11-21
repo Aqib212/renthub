@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { Prisma, Invoice } from "@prisma/client";
+import { audit } from "../../shared/audit";
 import { prisma } from "../../shared/prisma";
 import { NotFoundError, ConflictError, ValidationError } from "../../shared/utils/errors";
 import { toNumberId } from "../../shared/utils/helpers";
@@ -129,7 +130,8 @@ export class InvoiceService {
             items.push({
               billTypeId: l.billType.id,
               label: l.billType.name,
-              detail: l.result.detail,
+              // a typed amount with a note (e.g. a split building bill) shows the note instead of "Entered amount"
+              detail: (l.entry?.amount != null && l.entry.note) || l.result.detail,
               quantity: l.result.quantity,
               rate: l.result.rate,
               amount: l.result.amount,
@@ -185,6 +187,7 @@ export class InvoiceService {
   async generateForOrg(orgId: string | number | bigint, month: number, year: number) {
     const oid = toNumberId(orgId as any);
     const { created, missing, total } = await this.generate(oid, month, year, billableFlatWhere(oid, month, year));
+    if (created.length) await audit(prisma, "invoice.generate", "Invoice", null, { month, year, generated: created.length, total });
     return { generated: created.length, total, missing };
   }
 
@@ -312,6 +315,7 @@ export class InvoiceService {
         },
       });
       await recalculateInvoice(inv.id, tx);
+      await audit(tx, "invoice.update", "Invoice", inv.id, { period: `${inv.month}/${inv.year}`, before: { total: num(inv.totalAmount), discount: num(inv.discount), fine: num(inv.fine) }, changes: input as any });
     });
 
     return this.findById(orgId, id);
@@ -324,6 +328,7 @@ export class InvoiceService {
     }
     await prisma.$transaction(async (tx) => {
       await tx.invoice.delete({ where: { id: inv.id } });
+      await audit(tx, "invoice.delete", "Invoice", inv.id, { period: `${inv.month}/${inv.year}`, total: num(inv.totalAmount), flatId: Number(inv.flatId) });
       // re-open the balance this invoice had carried forward
       if (num(inv.previousDue) > 0) {
         const prev = await tx.invoice.findFirst({

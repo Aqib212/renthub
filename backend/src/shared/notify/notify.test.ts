@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { normalizeBdPhone } from "./phone";
-import { render, smsSegments, toBnDigits, taka, monthName, TEMPLATE_KEYS, SAMPLE } from "./templates";
+import { render, smsSegments, toBnDigits, taka, monthName, otpText, TEMPLATE_KEYS, SAMPLE } from "./templates";
 import { amountInWords, formatReceiptNo, reminderFor } from "./collect";
 
 test("Bangladeshi phone numbers", () => {
@@ -33,6 +33,12 @@ test("every template renders in both languages (EN ≤ 2 SMS segments, BN ≤ 3)
   }
   assert.match(render("RECEIPT", "BN", SAMPLE), /৳২৬,৪৫০/);
   assert.match(render("RECEIPT", "EN", SAMPLE), /Due Tk 1,450/);
+});
+
+test("portal login code fits one SMS in both languages", () => {
+  assert.equal(smsSegments(otpText("123456", "EN")), 1);
+  assert.equal(smsSegments(otpText("123456", "BN")), 1);
+  assert.match(otpText("123456", "BN"), /১২৩৪৫৬/);
 });
 
 test("reminder schedule", () => {

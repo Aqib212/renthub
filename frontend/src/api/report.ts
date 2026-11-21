@@ -7,6 +7,8 @@ export interface ReportQuery {
   month?: number;
   year?: number;
   buildingId?: number;
+  /** income year starting 1 July (tax_statement) */
+  fiscalYear?: number;
 }
 
 export const reportApi = {

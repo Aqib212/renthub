@@ -44,3 +44,8 @@ export const saveEntries = asyncHandler(async (req: AuthRequest, res: Response) 
   const data = await service.saveEntries(String(req.org!.id), req.body);
   sendSuccess(res, { statusCode: 200, message: "Bill entries saved", data });
 });
+
+export const saveBuildingBill = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const data = await service.saveBuildingBill(String(req.org!.id), req.body);
+  sendSuccess(res, { statusCode: 200, message: "Building bill split", data });
+});

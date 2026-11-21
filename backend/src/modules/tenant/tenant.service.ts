@@ -4,6 +4,8 @@ import { NotFoundError, ValidationError } from "../../shared/utils/errors";
 import { toNumberId } from "../../shared/utils/helpers";
 import { AgreementService, syncUnitStatus } from "../agreement/agreement.service";
 import type { CreateTenantInput, UpdateTenantInput } from "./tenant.validation";
+import { actorStore } from "../../shared/audit";
+import { saveDocument } from "../document/document.service";
 
 /**
  * A tenant is now a party: a person or company. Where they live, from when, and whether
@@ -42,17 +44,28 @@ function withStay({ agreements, ...t }: TenantWithStay) {
 const ymd = (s?: string) => (s ? s.slice(0, 10) : new Date().toISOString().slice(0, 10));
 const personal = <T extends UpdateTenantInput>({ moveInDate, moveOutDate, status, deposit, ...rest }: T) => rest;
 
+type TenantFiles = { photo?: Express.Multer.File; agreementDoc?: Express.Multer.File };
+
+/** Uploaded photo / agreement file also go to the document vault. */
+async function toVault(orgId: number, files: TenantFiles | undefined, tenantId: bigint, agreementId?: bigint | number | null, assetId?: bigint | null) {
+  const membershipId = actorStore.getStore()?.membershipId;
+  if (files?.photo) await saveDocument(prisma, orgId, files.photo, { kind: "PHOTO", name: "Photo", tenantId, uploadedById: membershipId });
+  if (files?.agreementDoc && agreementId) {
+    await saveDocument(prisma, orgId, files.agreementDoc, { kind: "AGREEMENT", name: "Agreement", tenantId, agreementId, assetId: assetId ?? undefined, uploadedById: membershipId });
+  }
+}
+
 export class TenantService {
   private agreements = new AgreementService();
 
   /** "Add tenant" on a flat: creates the person and an active agreement at the flat's asking rent. */
-  async create(orgId: string, flatId: string, input: CreateTenantInput, files?: { photo?: string; agreementDoc?: string }) {
+  async create(orgId: string, flatId: string, input: CreateTenantInput, files?: TenantFiles) {
     const oid = toNumberId(orgId);
     const flat = await prisma.flat.findFirst({ where: { id: toNumberId(flatId), floor: { building: { orgId: oid } } } });
     if (!flat) throw new NotFoundError("Flat not found");
 
     const tenant = await prisma.tenant.create({
-      data: { ...personal(input), email: input.email || null, photo: files?.photo || null, orgId: oid },
+      data: { ...personal(input), email: input.email || null, photo: files?.photo?.path || null, orgId: oid },
     });
     const { agreement, warnings } = await this.agreements.create(oid, {
       flatId: Number(flat.id),
@@ -66,7 +79,8 @@ export class TenantService {
       await prisma.tenant.delete({ where: { id: tenant.id } }); // keep it all-or-nothing
       throw e;
     });
-    if (files?.agreementDoc) await prisma.agreement.update({ where: { id: agreement.id }, data: { documentPath: files.agreementDoc } });
+    if (files?.agreementDoc) await prisma.agreement.update({ where: { id: agreement.id }, data: { documentPath: files.agreementDoc.path } });
+    await toVault(oid, files, tenant.id, agreement.id, flat.assetId);
     return { ...(await this.findById(orgId, String(tenant.id))), warnings };
   }
 
@@ -97,11 +111,11 @@ export class TenantService {
    * Personal details are saved on the person. The old "move-out date / former" fields end the
    * running agreement (no deposit settlement: use the agreement's Move out for that).
    */
-  async update(orgId: string, id: string, input: UpdateTenantInput, files?: { photo?: string; agreementDoc?: string }) {
+  async update(orgId: string, id: string, input: UpdateTenantInput, files?: TenantFiles) {
     const current = await this.findById(orgId, id);
     const data: Prisma.TenantUpdateInput = { ...personal(input) };
     if (input.email !== undefined) data.email = input.email || null;
-    if (files?.photo) data.photo = files.photo;
+    if (files?.photo) data.photo = files.photo.path;
     await prisma.tenant.update({ where: { id: toNumberId(id) }, data });
 
     const live = current.agreementId && (current.agreementStatus === "ACTIVE" || current.agreementStatus === "NOTICE");
@@ -113,8 +127,9 @@ export class TenantService {
       });
     }
     if (files?.agreementDoc && current.agreementId) {
-      await prisma.agreement.update({ where: { id: current.agreementId }, data: { documentPath: files.agreementDoc } });
+      await prisma.agreement.update({ where: { id: current.agreementId }, data: { documentPath: files.agreementDoc.path } });
     }
+    await toVault(toNumberId(orgId), files, BigInt(id), current.agreementId);
     return this.findById(orgId, id);
   }
 

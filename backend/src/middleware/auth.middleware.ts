@@ -24,6 +24,8 @@ export const authenticate = (req: AuthRequest, _res: Response, next: NextFunctio
 
   try {
     const decoded = verifyAccessToken(token);
+    // tenant portal tokens share the secret but never open staff routes
+    if ((decoded as { typ?: string }).typ === "tenant") return next(new UnauthorizedError("Invalid or expired token"));
     req.user = {
       userId: decoded.userId,
       email: decoded.email,

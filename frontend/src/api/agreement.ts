@@ -16,12 +16,15 @@ export interface AgreementSummary {
   bankOnly: boolean;
   tdsPercent: number;
   depositBalance: number;
-  tenant: { id: number; firstName: string; lastName: string; phone: string | null; nid?: string | null; members?: number };
+  tenant: { id: number; firstName: string; lastName: string; phone: string | null; nid?: string | null; members?: number; lang?: "BN" | "EN"; permanentAddress?: string | null };
   unit: { id: number; name: string; floorName: string; building: { id: number; name: string } } | null;
 }
 
 export interface AgreementDetail extends AgreementSummary {
   currentRate: number;
+  terms: { clauses?: string[] } | null;
+  /** pending move-out requests from the tenant portal */
+  notices?: { id: number; noticeDate: string; moveOutDate: string; reason: string | null; createdAt: string }[];
   revisions: { id: number; effectiveFrom: string; rate: number; reason: string | null }[];
   deposits: { id: number; type: DepositType; amount: number; date: string; note: string | null }[];
   invoices: { id: number; month: number; year: number; totalAmount: number; paidAmount: number; dueAmount: number; status: string; carriedForward: boolean }[];
@@ -71,6 +74,10 @@ export const agreementApi = {
   end: (id: number, body: { endDate: string; deductions: { amount: number; note: string }[]; finalInvoice?: boolean; refund?: boolean }) =>
     d<WithWarnings & { due: number }>(client.post(`/agreements/${id}/end`, body)),
   remove: (id: number) => client.delete(`/agreements/${id}`),
+  update: (id: number, body: { tdsPercent?: number; clauses?: string[] }) => d<AgreementDetail>(client.patch(`/agreements/${id}`, body)),
+  acceptNotice: (id: number, rid: number) => d<WithWarnings>(client.post(`/agreements/${id}/notice-requests/${rid}/accept`)),
+  declineNotice: (id: number, rid: number, note?: string) => d<WithWarnings>(client.post(`/agreements/${id}/notice-requests/${rid}/decline`, { note })),
+  noticeRequests: (status = "PENDING") => d<{ id: number; agreementId: number; moveOutDate: string; tenant: { firstName: string; lastName: string } }[]>(client.get("/agreements/notice-requests", { params: { status } })),
 };
 
 export const AGREEMENT_STATUS: Record<AgreementStatus, { label: string; color: "default" | "success" | "warning" | "info" }> = {
