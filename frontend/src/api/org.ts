@@ -6,6 +6,9 @@ export type StaffRole = Exclude<OrgRole, "OWNER">;
 export interface OrgSettings {
   dueDay: number;
   noticeMonths: number;
+  agreementClauses?: string[];
+  portal?: { enabled: boolean };
+  payInfo?: string;
 }
 
 export interface Organization {

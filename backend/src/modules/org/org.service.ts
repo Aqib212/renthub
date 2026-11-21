@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
+import { audit } from "../../shared/audit";
 import { prisma } from "../../shared/prisma";
 import { ConflictError, ForbiddenError, NotFoundError } from "../../shared/utils/errors";
 import { toNumberId } from "../../shared/utils/helpers";
@@ -11,12 +12,18 @@ export interface OrgSettings {
   noticeMonths: number;
   /** SMS receipts and the 5th / due day / overdue reminders */
   sms: { enabled: boolean; reminders: boolean };
+  /** extra clauses added to every new agreement deed */
+  agreementClauses: string[];
+  /** tenant portal on/off for this landlord */
+  portal: { enabled: boolean };
+  /** how tenants pay (bKash number, bank account); shown in the portal */
+  payInfo: string;
 }
-export const DEFAULT_SETTINGS: OrgSettings = { dueDay: 10, noticeMonths: 2, sms: { enabled: true, reminders: true } };
+export const DEFAULT_SETTINGS: OrgSettings = { dueDay: 10, noticeMonths: 2, sms: { enabled: true, reminders: true }, agreementClauses: [], portal: { enabled: true }, payInfo: "" };
 
 export const settingsOf = (raw: unknown): OrgSettings => {
   const r = (raw as Partial<OrgSettings>) ?? {};
-  return { ...DEFAULT_SETTINGS, ...r, sms: { ...DEFAULT_SETTINGS.sms, ...(r.sms ?? {}) } };
+  return { ...DEFAULT_SETTINGS, ...r, sms: { ...DEFAULT_SETTINGS.sms, ...(r.sms ?? {}) }, portal: { ...DEFAULT_SETTINGS.portal, ...(r.portal ?? {}) } };
 };
 
 const memberSelect = {
@@ -40,7 +47,7 @@ export class OrgService {
       where: { id: orgId },
       data: {
         ...(input.name && { name: input.name }),
-        ...(input.settings && { settings: { ...current.settings, ...input.settings, sms: { ...current.settings.sms, ...(input.settings.sms ?? {}) } } }),
+        ...(input.settings && { settings: { ...current.settings, ...input.settings, sms: { ...current.settings.sms, ...(input.settings.sms ?? {}) }, portal: { ...current.settings.portal, ...(input.settings.portal ?? {}) } } }),
       },
     });
     return { ...org, settings: settingsOf(org.settings) };
@@ -77,19 +84,24 @@ export class OrgService {
     const existing = await prisma.membership.findUnique({ where: { userId_orgId: { userId: user.id, orgId } } });
     if (existing) throw new ConflictError("This person is already a member");
 
-    return prisma.membership.create({ data: { userId: user.id, orgId, role: input.role }, select: memberSelect });
+    const m = await prisma.membership.create({ data: { userId: user.id, orgId, role: input.role }, select: memberSelect });
+    await audit(prisma, "member.add", "Membership", m.id, { email: input.email, role: input.role });
+    return m;
   }
 
   async updateMember(orgId: number, memberId: string, input: UpdateMemberInput) {
     const m = await this.ownMember(orgId, memberId);
     if (m.role === "OWNER") throw new ForbiddenError("The owner's role can't be changed here");
-    return prisma.membership.update({ where: { id: m.id }, data: input, select: memberSelect });
+    const updated = await prisma.membership.update({ where: { id: m.id }, data: input, select: memberSelect });
+    await audit(prisma, "member.update", "Membership", m.id, { before: { role: m.role, isActive: m.isActive }, after: input });
+    return updated;
   }
 
   async removeMember(orgId: number, memberId: string) {
     const m = await this.ownMember(orgId, memberId);
     if (m.role === "OWNER") throw new ForbiddenError("The owner can't be removed");
     await prisma.membership.delete({ where: { id: m.id } });
+    await audit(prisma, "member.remove", "Membership", m.id, { role: m.role, userId: Number(m.userId) });
   }
 
   private async ownMember(orgId: number, memberId: string) {

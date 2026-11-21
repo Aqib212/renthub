@@ -22,6 +22,7 @@ export interface Invoice {
   month: number;
   year: number;
   rent: number;
+  agreementId?: number | null;
   previousDue: number;
   discount: number;
   fine: number;

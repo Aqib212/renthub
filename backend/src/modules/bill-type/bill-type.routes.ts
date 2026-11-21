@@ -3,7 +3,7 @@ import * as controller from "./bill-type.controller";
 import { validate } from "../../middleware/validate.middleware";
 import { authenticate } from "../../middleware/auth.middleware";
 import { requireOrg, writes } from "../../middleware/org.middleware";
-import { billTypeSchema, updateBillTypeSchema, flatChargesSchema, entriesQuerySchema, saveEntriesSchema } from "./bill-type.validation";
+import { billTypeSchema, updateBillTypeSchema, flatChargesSchema, entriesQuerySchema, saveEntriesSchema, buildingBillSchema } from "./bill-type.validation";
 
 const router = Router();
 router.use(authenticate, requireOrg, writes("billing:write"));
@@ -19,5 +19,6 @@ export const billEntryRouter = Router();
 billEntryRouter.use(authenticate, requireOrg, writes("billing:write"));
 billEntryRouter.get("/", validate(entriesQuerySchema, "query"), controller.getEntries);
 billEntryRouter.put("/bulk", validate(saveEntriesSchema), controller.saveEntries);
+billEntryRouter.put("/building-bills", validate(buildingBillSchema), controller.saveBuildingBill);
 
 export default router;

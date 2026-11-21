@@ -16,7 +16,7 @@ import {
   EditCalendarOutlined,
   BadgeOutlined,
   GridViewOutlined,
-  HandshakeOutlined,
+  HandshakeOutlined, BuildOutlined, HistoryOutlined,
   SettingsOutlined,
   SavingsOutlined,
   SmsOutlined,
@@ -44,6 +44,7 @@ const groups: { label: MessageKey; items: NavItem[] }[] = [
       { label: "nav.unitsList", icon: <ApartmentOutlined />, path: "/flats" },
       { label: "nav.tenants", icon: <PeopleOutline />, path: "/tenants" },
       { label: "nav.agreements", icon: <HandshakeOutlined />, path: "/agreements" },
+      { label: "nav.maintenance", icon: <BuildOutlined />, path: "/maintenance" },
     ],
   },
   {
@@ -68,6 +69,7 @@ const groups: { label: MessageKey; items: NavItem[] }[] = [
     items: [
       { label: "nav.messages", icon: <SmsOutlined />, path: "/messages", roles: ["OWNER", "MANAGER", "ACCOUNTANT"] },
       { label: "nav.staff", icon: <BadgeOutlined />, path: "/staff", roles: ["OWNER"] },
+      { label: "nav.activity", icon: <HistoryOutlined />, path: "/activity", roles: ["OWNER"] },
       { label: "nav.settings", icon: <SettingsOutlined />, path: "/settings", roles: ["OWNER"] },
     ],
   },

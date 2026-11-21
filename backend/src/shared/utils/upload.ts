@@ -1,8 +1,10 @@
 import multer from "multer";
 import path from "path";
 import crypto from "crypto";
+import fs from "fs";
 
-const uploadsDir = path.resolve(__dirname, "../../../uploads");
+export const uploadsDir = path.resolve(__dirname, "../../../uploads");
+fs.mkdirSync(uploadsDir, { recursive: true });
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {

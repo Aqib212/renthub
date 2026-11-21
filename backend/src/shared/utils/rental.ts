@@ -100,3 +100,17 @@ export function ruleWarnings(i: RuleInput): string[] {
   }
   return w;
 }
+
+/** Bangladesh income year: 1 July `fy` to 30 June `fy + 1`. */
+export const fiscalYearRange = (fy: number): Period => ({ start: utcDate(fy, 7, 1), end: utcDate(fy + 1, 6, 30) });
+
+/** Days of `period` covered by no agreement (agreements given as start/end, end null = open). */
+export function vacantDays(period: Period, agreements: { startDate: Date; endDate?: Date | null }[]) {
+  const covered = new Set<number>();
+  for (const a of agreements) {
+    const from = Math.max(a.startDate.getTime(), period.start.getTime());
+    const to = Math.min((a.endDate ?? period.end).getTime(), period.end.getTime());
+    for (let t = from; t <= to; t += DAY) covered.add(t);
+  }
+  return daysBetween(period.start, period.end) - covered.size;
+}

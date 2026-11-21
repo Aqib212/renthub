@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, MenuItem,
-  Stack, CircularProgress, Autocomplete,
+  Stack, CircularProgress, Autocomplete, Alert,
 } from "@mui/material";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { paymentApi } from "@/api/payment";
 import { invoiceApi } from "@/api/invoice";
+import { agreementApi } from "@/api/agreement";
 import { METHOD_LABELS } from "@/types/payment";
 import { MONTH_NAMES } from "@/types/invoice";
 import type { PaymentMethod } from "@/types/payment";
@@ -61,6 +62,15 @@ export function PaymentFormDialog({ open, onClose, preselectedInvoiceId }: Props
     if (selectedInvoice && open) setAmount(String(selectedInvoice.dueAmount));
   }, [selectedInvoice?.id, open]);
 
+  // company tenants withhold TDS from the rent and pay it to the government; it settles that part of the invoice
+  const { data: agreement } = useQuery({
+    queryKey: ["agreement", selectedInvoice?.agreementId],
+    queryFn: () => agreementApi.get(selectedInvoice!.agreementId!),
+    enabled: open && !!selectedInvoice?.agreementId,
+  });
+  const tdsPercent = Number(agreement?.tdsPercent ?? 0);
+  const tdsAmount = selectedInvoice ? Math.round((selectedInvoice.rent * tdsPercent) / 100) : 0;
+
   const createMutation = useMutation({
     mutationFn: () => paymentApi.create({
       invoiceId,
@@ -107,6 +117,14 @@ export function PaymentFormDialog({ open, onClose, preselectedInvoiceId }: Props
               fullWidth
               disabled={!!preselectedInvoiceId}
             />
+            {tdsPercent > 0 && selectedInvoice && (
+              <Alert severity="info" action={
+                <Button size="small" onClick={() => { setMethod("TDS"); setAmount(String(Math.min(tdsAmount, selectedInvoice.dueAmount))); }}>Record TDS</Button>
+              }>
+                {agreement?.tenant.firstName} withholds {tdsPercent}% TDS: rent {formatBDT(selectedInvoice.rent)} × {tdsPercent}% = {formatBDT(tdsAmount)}.
+                Record it as a TDS payment with the challan number.
+              </Alert>
+            )}
             {selectedInvoice && (
               <Stack direction="row" spacing={1}>
                 <TextField
@@ -131,14 +149,14 @@ export function PaymentFormDialog({ open, onClose, preselectedInvoiceId }: Props
               select label="Payment Method" required fullWidth value={method}
               onChange={(e) => setMethod(e.target.value as PaymentMethod)}
             >
-              {(Object.keys(METHOD_LABELS) as PaymentMethod[]).map((m) => (
+              {(Object.keys(METHOD_LABELS) as PaymentMethod[]).filter((m) => m !== "DEPOSIT").map((m) => (
                 <MenuItem key={m} value={m}>{METHOD_LABELS[m]}</MenuItem>
               ))}
             </TextField>
             <TextField
-              label="Transaction ID" fullWidth value={transactionId}
+              label={method === "TDS" ? "Challan no." : "Transaction ID"} fullWidth value={transactionId}
               onChange={(e) => setTransactionId(e.target.value)}
-              placeholder="bKash/Cheque/Bank reference"
+              placeholder={method === "TDS" ? "Treasury challan / certificate no." : "bKash/Cheque/Bank reference"}
             />
             <TextField
               label="Collected By" fullWidth value={collector}

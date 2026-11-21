@@ -3,6 +3,7 @@ import { PaymentMethod, Prisma } from "@prisma/client";
 import { env } from "../../config/env";
 import { enqueue } from "../notification/notification.service";
 import { amountInWords, formatReceiptNo } from "../../shared/notify/collect";
+import { audit } from "../../shared/audit";
 import { prisma } from "../../shared/prisma";
 import { NotFoundError, ValidationError } from "../../shared/utils/errors";
 import { recalculateInvoice, invoiceNo } from "../invoice/invoice.service";
@@ -68,7 +69,8 @@ function toReceipt(p: Prisma.PaymentGetPayload<{ include: typeof receiptInclude 
 
 export class PaymentService {
   /** Records a payment with the next receipt number and queues the receipt SMS, in one transaction. */
-  async create(orgId: string, input: CreatePaymentInput, collectedById?: number) {
+  /** `inTx` runs inside the payment transaction (e.g. a portal claim flips to CONFIRMED atomically). */
+  async create(orgId: string, input: CreatePaymentInput, collectedById?: number, inTx?: (tx: Prisma.TransactionClient, p: { id: bigint }) => Promise<void>) {
     const invoice = await prisma.invoice.findFirst({
       where: { id: toNumberId(input.invoiceId), orgId: toNumberId(orgId) },
       include: {
@@ -104,6 +106,10 @@ export class PaymentService {
       await recalculateInvoice(input.invoiceId, tx);
       const after = await tx.invoice.findUniqueOrThrow({ where: { id: invoice.id }, select: { dueAmount: true } });
 
+      if (inTx) await inTx(tx, p);
+      await audit(tx, "payment.create", "Payment", p.id, { receiptNo: p.receiptNo, amount: Number(input.amount), method: input.method, invoiceId: Number(invoice.id) });
+      // TDS is paid to the government by the company tenant, not received money: no SMS
+      if (input.method === "TDS") return p;
       // receipt SMS, sent by the outbox drainer after this transaction commits
       await enqueue(tx, {
         orgId: invoice.orgId,
@@ -228,6 +234,7 @@ export class PaymentService {
       if (existing.invoiceId) {
         await recalculateInvoice(existing.invoiceId, tx);
       }
+      await audit(tx, "payment.update", "Payment", p.id, { receiptNo: p.receiptNo, before: { amount: Number(existing.amount), method: existing.method, date: existing.date }, after: { amount: Number(p.amount), method: p.method, date: p.date } });
 
       return p;
     });
@@ -266,6 +273,7 @@ export class PaymentService {
     await prisma.$transaction(async (tx) => {
       await tx.payment.delete({ where: { id: toNumberId(id) } });
       await recalculateInvoice(existing.invoiceId, tx);
+      await audit(tx, "payment.delete", "Payment", existing.id, { receiptNo: existing.receiptNo, amount: Number(existing.amount), method: existing.method, invoiceId: Number(existing.invoiceId) });
     });
   }
 

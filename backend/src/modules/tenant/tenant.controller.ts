@@ -8,10 +8,7 @@ const tenantService = new TenantService();
 
 function extractFilePaths(files?: { [fieldname: string]: Express.Multer.File[] }) {
   if (!files) return undefined;
-  return {
-    photo: files.photo?.[0]?.path,
-    agreementDoc: files.agreementDoc?.[0]?.path,
-  };
+  return { photo: files.photo?.[0], agreementDoc: files.agreementDoc?.[0] };
 }
 
 export const create = asyncHandler(async (req: AuthRequest, res: Response) => {

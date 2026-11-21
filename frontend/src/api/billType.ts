@@ -14,4 +14,7 @@ export const billTypeApi = {
     (await client.get("/bill-entries", { params: { month, year } })).data.data,
   saveMonth: async (month: number, year: number, entries: any[]): Promise<BillingMonth> =>
     (await client.put("/bill-entries/bulk", { month, year, entries })).data.data,
+  /** Save a building-wide bill; the server splits it into each unit's amount and returns the month. */
+  saveBuildingBill: async (body: { buildingId: number; billTypeId: number; month: number; year: number; total: number; note?: string | null }): Promise<BillingMonth> =>
+    (await client.put("/bill-entries/building-bills", body)).data.data,
 };

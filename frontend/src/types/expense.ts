@@ -1,4 +1,4 @@
-export type ExpenseCategory = "LIFT" | "SECURITY" | "CLEANING" | "COMMON_ELECTRICITY" | "REPAIRS" | "MAINTENANCE" | "MISC";
+export type ExpenseCategory = "LIFT" | "SECURITY" | "CLEANING" | "COMMON_ELECTRICITY" | "REPAIRS" | "MAINTENANCE" | "MISC" | "HOLDING_TAX" | "STAFF_SALARY";
 
 export interface Expense {
   id: number;
@@ -41,6 +41,8 @@ export const CATEGORY_LABELS: Record<ExpenseCategory, string> = {
   REPAIRS: "Repairs",
   MAINTENANCE: "Maintenance",
   MISC: "Miscellaneous",
+  HOLDING_TAX: "Holding tax",
+  STAFF_SALARY: "Staff salary",
 };
 
 export const CATEGORY_COLORS: Record<ExpenseCategory, string> = {
@@ -51,4 +53,6 @@ export const CATEGORY_COLORS: Record<ExpenseCategory, string> = {
   REPAIRS: "#f44336",
   MAINTENANCE: "#9c27b0",
   MISC: "#795548",
+  HOLDING_TAX: "#0B5D46",
+  STAFF_SALARY: "#1D4ED8",
 };

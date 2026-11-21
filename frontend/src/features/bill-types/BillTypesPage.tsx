@@ -7,7 +7,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { billTypeApi } from "@/api/billType";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { methodLabel, type BillType } from "@/types/billType";
+import { methodLabel, type BillType, SPLIT_RULES } from "@/types/billType";
 import { formatBDT, apiError } from "@/utils/format";
 import { BillTypeDialog } from "./components/BillTypeDialog";
 import { BillTypeFlatsDialog } from "./components/BillTypeFlatsDialog";
@@ -20,6 +20,7 @@ const summary = (bt: BillType) => {
     case "SLAB": return `${bt.slabs?.steps.length ?? 0} slabs${bt.demandChargePerKw ? ` · ${formatBDT(bt.demandChargePerKw)}/kW demand` : ""}${vat}`;
     case "PER_PERSON": return `${formatBDT(bt.rate)} per person${vat}`;
     case "MANUAL": return "Amount entered each month";
+    case "SHARED": return `Building bill split ${SPLIT_RULES.find((s) => s.value === (bt.split ?? "EQUAL"))?.label.toLowerCase()}`;
   }
 };
 

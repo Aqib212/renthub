@@ -6,7 +6,7 @@ import {
 } from "@mui/material";
 import {
   TrendingUp, Payments, Apartment, Warning, AccountBalanceWallet,
-  PictureAsPdf, TableChart,
+  PictureAsPdf, TableChart, Savings, EventBusy, Badge, RequestQuote,
 } from "@mui/icons-material";
 import { useQuery } from "@tanstack/react-query";
 import { reportApi } from "@/api/report";
@@ -19,7 +19,15 @@ const REPORT_TYPES = [
   { value: "rent_roll", label: "Rent Roll", icon: <Apartment />, color: "#9c27b0" },
   { value: "outstanding", label: "Outstanding", icon: <Warning />, color: "#f44336" },
   { value: "expense_detail", label: "Expense Detail", icon: <AccountBalanceWallet />, color: "#ff9800" },
+  { value: "deposit_liability", label: "Deposits held", icon: <Savings />, color: "#0B5D46" },
+  { value: "vacancy_loss", label: "Vacancy loss", icon: <EventBusy />, color: "#B42318" },
+  { value: "collection_by_collector", label: "By collector", icon: <Badge />, color: "#1D4ED8" },
+  { value: "tax_statement", label: "Tax statement", icon: <RequestQuote />, color: "#8A5200" },
 ];
+
+// Bangladesh income year: 1 July – 30 June
+const thisFiscalYear = new Date().getMonth() >= 6 ? new Date().getFullYear() : new Date().getFullYear() - 1;
+const fiscalYears = Array.from({ length: 5 }, (_, i) => thisFiscalYear - i);
 
 const currentYear = new Date().getFullYear();
 const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
@@ -31,15 +39,19 @@ export default function ReportsPage() {
   const [month, setMonth] = useState<number | undefined>(undefined);
   const [year, setYear] = useState<number | undefined>(undefined);
   const [buildingId, setBuildingId] = useState<number | undefined>(undefined);
+  const [fiscalYear, setFiscalYear] = useState(thisFiscalYear);
+  const isTax = selectedType === "tax_statement";
 
-  const query: ReportQuery = {
-    type: selectedType,
-    ...(dateFrom && { dateFrom }),
-    ...(dateTo && { dateTo }),
-    ...(month && { month }),
-    ...(year && { year }),
-    ...(buildingId && { buildingId }),
-  };
+  const query: ReportQuery = isTax
+    ? { type: selectedType, fiscalYear, ...(buildingId && { buildingId }) }
+    : {
+        type: selectedType,
+        ...(dateFrom && { dateFrom }),
+        ...(dateTo && { dateTo }),
+        ...(month && { month }),
+        ...(year && { year }),
+        ...(buildingId && { buildingId }),
+      };
 
   const { data, isLoading, isFetching } = useQuery<any>({
     queryKey: ["report", query],
@@ -124,7 +136,7 @@ export default function ReportsPage() {
 
       <Grid container spacing={2} mb={3}>
         {REPORT_TYPES.map((rt) => (
-          <Grid item xs={6} sm={4} md={2.4} key={rt.value}>
+          <Grid item xs={6} sm={4} md={2} key={rt.value}>
             <Card
               sx={{
                 border: selectedType === rt.value ? 2 : 1,
@@ -145,7 +157,13 @@ export default function ReportsPage() {
       </Grid>
 
       <Paper sx={{ p: 2, mb: 2 }}>
-        <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+        <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
+          {isTax ? (
+            <TextField select label="Income year" size="small" sx={{ minWidth: 200 }} value={fiscalYear} onChange={(e) => setFiscalYear(Number(e.target.value))}
+              helperText="1 July – 30 June. For your accountant; not tax advice.">
+              {fiscalYears.map((fy) => <MenuItem key={fy} value={fy}>{fy}–{String((fy + 1) % 100).padStart(2, "0")}</MenuItem>)}
+            </TextField>
+          ) : <>
           <TextField
             label="Date From" type="date" size="small" sx={{ minWidth: 160 }}
             InputLabelProps={{ shrink: true }}
@@ -181,6 +199,7 @@ export default function ReportsPage() {
               <MenuItem key={y} value={y}>{y}</MenuItem>
             ))}
           </TextField>
+          </>}
           <Divider orientation="vertical" flexItem />
           <Button
             variant="contained"
@@ -219,6 +238,7 @@ export default function ReportsPage() {
 
 function getRows(data: any): Record<string, any>[] | null {
   if (!data) return null;
+  if (data.rows) return data.rows; // phase 4 reports return ready-made rows
   if (data.expenseBreakdown) return data.expenseBreakdown;
   if (data.byMethod) return data.byMethod.map((m: any) => ({ method: m.method, amount: m.amount, count: m.count }));
   if (data.flats) return data.flats.map((f: any) => ({

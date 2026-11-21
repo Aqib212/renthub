@@ -1,5 +1,5 @@
-/** DEPOSIT = paid from the tenant's deposit at move-out (never chosen by hand). */
-export type PaymentMethod = "CASH" | "BKASH" | "NAGAD" | "ROCKET" | "BANK" | "CHEQUE" | "DEPOSIT";
+/** DEPOSIT = paid from the tenant's deposit at move-out (never chosen by hand). TDS = tax a company tenant withheld. */
+export type PaymentMethod = "CASH" | "BKASH" | "NAGAD" | "ROCKET" | "BANK" | "CHEQUE" | "DEPOSIT" | "TDS";
 
 export interface Payment {
   id: number;
@@ -66,6 +66,7 @@ export const METHOD_LABELS: Record<PaymentMethod, string> = {
   BANK: "Bank Transfer",
   CHEQUE: "Cheque",
   DEPOSIT: "From deposit",
+  TDS: "TDS withheld",
 };
 
 export const METHOD_COLORS: Record<PaymentMethod, string> = {
@@ -76,4 +77,5 @@ export const METHOD_COLORS: Record<PaymentMethod, string> = {
   BANK: "#9c27b0",
   CHEQUE: "#607d8b",
   DEPOSIT: "#55615B",
+  TDS: "#8A5200",
 };

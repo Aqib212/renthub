@@ -2,12 +2,13 @@ import { Prisma, BillType, BillEntry, FlatCharge } from "@prisma/client";
 import { prisma } from "../../shared/prisma";
 import { NotFoundError, ConflictError, ValidationError } from "../../shared/utils/errors";
 import { toNumberId } from "../../shared/utils/helpers";
-import { calcCharge, BERC_RESIDENTIAL, type BillTypeCalc, type ChargeResult } from "../../shared/utils/billing";
+import { calcCharge, splitShares, BERC_RESIDENTIAL, type BillTypeCalc, type ChargeResult } from "../../shared/utils/billing";
+import { audit } from "../../shared/audit";
 import { chargeFor, monthPeriod } from "../../shared/utils/rental";
 
 /** An agreement that currently holds its asset. */
 export const LIVE = { status: { in: ["ACTIVE", "NOTICE"] } } satisfies Prisma.AgreementWhereInput;
-import type { BillTypeInput, FlatChargesInput, SaveEntriesInput } from "./bill-type.validation";
+import type { BillTypeInput, BuildingBillInput, FlatChargesInput, SaveEntriesInput } from "./bill-type.validation";
 
 const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 const period = (month: number, year: number) => year * 12 + month;
@@ -244,9 +245,11 @@ export class BillTypeService {
       select: { id: true, flatId: true, status: true, totalAmount: true },
     });
     const invoiceByFlat = new Map(invoices.map((i) => [i.flatId, i]));
+    const buildingBills = await prisma.buildingBill.findMany({ where: { orgId: oid, month, year } });
 
     return {
       billTypes,
+      buildingBills,
       rows: rows.map(({ flat, tenant, agreements, lines }) => ({
         flatId: flat.id,
         flatName: flat.name,
@@ -309,6 +312,60 @@ export class BillTypeService {
           : prisma.billEntry.upsert({ where, update: values, create: { ...values, flatId: e.flatId, billTypeId: e.billTypeId, month, year } });
       })
     );
+    return this.getEntries(orgId, month, year);
+  }
+
+  /**
+   * Save a building-wide bill for the month and split it into each billable unit's typed amount
+   * (BillEntry.amount), so invoice generation needs no special case. Saving again re-splits.
+   */
+  async saveBuildingBill(orgId: string, input: BuildingBillInput) {
+    const oid = toNumberId(orgId);
+    const { month, year, buildingId, billTypeId, total } = input;
+    const [bt, building] = await Promise.all([
+      prisma.billType.findFirst({ where: { id: billTypeId, orgId: oid } }),
+      prisma.building.findFirst({ where: { id: buildingId, orgId: oid } }),
+    ]);
+    if (!bt || !building) throw new NotFoundError("Bill type or building not found");
+    if (bt.calcMethod !== "SHARED") throw new ValidationError(`${bt.name} is not a shared building bill`);
+
+    const where: Prisma.FlatWhereInput = { ...billableFlatWhere(oid, month, year), floor: { buildingId: building.id, building: { orgId: oid } } };
+    const { rows } = await loadBillingContext(oid, month, year, where);
+    const sharing = rows.filter((r) => r.lines.find((l) => l.billType.id === bt.id)?.applies);
+    if (!sharing.length) throw new ValidationError(`No unit in ${building.name} is billed ${bt.name} for this month`);
+
+    const rule = bt.split ?? "EQUAL";
+    if (rule === "PER_SQFT") {
+      const missing = sharing.filter((r) => !Number(r.flat.area)).map((r) => r.flat.name);
+      if (missing.length) throw new ValidationError(`Enter the size in sq ft for: ${missing.join(", ")}`);
+    }
+    const weights = sharing.map((r) => (rule === "PER_PERSON" ? r.tenant?.members ?? 1 : rule === "PER_SQFT" ? Number(r.flat.area) : 1));
+    const shares = splitShares(total, weights);
+    const sum = weights.reduce((s, w) => s + w, 0);
+    const tk = (n: number) => `৳${n.toLocaleString("en-IN")}`;
+    const noteFor = (w: number) =>
+      rule === "PER_PERSON" ? `${tk(total)} × ${w} of ${sum} people`
+      : rule === "PER_SQFT" ? `${tk(total)} × ${w} of ${sum} sq ft`
+      : `${tk(total)} ÷ ${sharing.length} units`;
+
+    await prisma.$transaction(async (tx) => {
+      const bill = await tx.buildingBill.upsert({
+        where: { buildingId_billTypeId_month_year: { buildingId: building.id, billTypeId: bt.id, month, year } },
+        update: { total, note: input.note ?? null },
+        create: { orgId: oid, buildingId: building.id, billTypeId: bt.id, month, year, total, note: input.note ?? null },
+      });
+      // a unit that dropped out since the last split loses its old share
+      await tx.billEntry.deleteMany({ where: { billTypeId: bt.id, month, year, flat: { floor: { buildingId: building.id } }, flatId: { notIn: sharing.map((r) => r.flat.id) } } });
+      for (const [i, r] of sharing.entries()) {
+        const values = { amount: shares[i], note: noteFor(weights[i]), previousReading: null, currentReading: null, units: null };
+        await tx.billEntry.upsert({
+          where: { flatId_billTypeId_month_year: { flatId: r.flat.id, billTypeId: bt.id, month, year } },
+          update: values,
+          create: { ...values, flatId: r.flat.id, billTypeId: bt.id, month, year },
+        });
+      }
+      await audit(tx, "billing.building_bill", "BuildingBill", bill.id, { building: building.name, billType: bt.name, month, year, total, units: sharing.length });
+    });
     return this.getEntries(orgId, month, year);
   }
 }

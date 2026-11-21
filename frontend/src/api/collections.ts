@@ -26,7 +26,7 @@ export type NotificationStatus = "QUEUED" | "SENT" | "FAILED" | "SKIPPED";
 export interface OutboxRow {
   id: number;
   to: string | null;
-  template: "RECEIPT" | "RENT_DUE" | "DUE_TODAY" | "OVERDUE";
+  template: "RECEIPT" | "RENT_DUE" | "DUE_TODAY" | "OVERDUE" | "CLAIM_REJECTED" | "NOTICE_ACCEPTED" | "NOTICE_DECLINED";
   lang: "BN" | "EN";
   body: string | null;
   status: NotificationStatus;

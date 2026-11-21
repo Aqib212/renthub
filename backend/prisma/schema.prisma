@@ -113,6 +113,8 @@ enum PaymentMethod {
   CHEQUE
   /// deposit adjusted against dues at move-out (not cash received)
   DEPOSIT
+  /// tax a company tenant withheld and paid to the government (challan no. in transactionId)
+  TDS
 }
 
 enum ExpenseCategory {
@@ -123,6 +125,8 @@ enum ExpenseCategory {
   REPAIRS
   MAINTENANCE
   MISC
+  HOLDING_TAX
+  STAFF_SALARY
 }
 
 enum CalcMethod {
@@ -131,6 +135,44 @@ enum CalcMethod {
   SLAB
   PER_PERSON
   MANUAL
+  /// one building bill split across the units (see BuildingBill)
+  SHARED
+}
+
+enum SplitRule {
+  EQUAL
+  PER_PERSON
+  PER_SQFT
+}
+
+enum MaintenanceStatus {
+  NEW
+  ASSIGNED
+  WAITING
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum ClaimStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+enum NoticeRequestStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  WITHDRAWN
+}
+
+enum DocumentKind {
+  NID
+  AGREEMENT
+  PHOTO
+  UTILITY
+  OTHER
 }
 
 model User {
@@ -186,6 +228,12 @@ model Organization {
   counters      OrgCounter[]
   notifications Notification[]
   handovers     CashHandover[]
+  buildingBills BuildingBill[]
+  maintenance   MaintenanceRequest[]
+  documents     Document[]
+  auditLogs     AuditLog[]
+  claims        PaymentClaim[]
+  notices       NoticeRequest[]
 
   @@map("organizations")
 }
@@ -203,9 +251,14 @@ model Membership {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
-  collected         Payment[]      @relation("CollectedBy")
-  handoversGiven    CashHandover[] @relation("HandoverFrom")
-  handoversReceived CashHandover[] @relation("HandoverTo")
+  collected           Payment[]            @relation("CollectedBy")
+  handoversGiven      CashHandover[]       @relation("HandoverFrom")
+  handoversReceived   CashHandover[]       @relation("HandoverTo")
+  maintenanceAssigned MaintenanceRequest[] @relation("MaintenanceAssignee")
+  maintenanceCreated  MaintenanceRequest[] @relation("MaintenanceCreator")
+  documentsUploaded   Document[]
+  claimsReviewed      PaymentClaim[]       @relation("ClaimReviewer")
+  noticesReviewed     NoticeRequest[]      @relation("NoticeReviewer")
 
   @@unique([userId, orgId])
   @@index([orgId])
@@ -232,19 +285,25 @@ model OwnerProfile {
 }
 
 model AuditLog {
-  id        BigInt   @id @default(autoincrement())
-  userId    BigInt
-  user      User     @relation(fields: [userId], references: [id])
-  action    String   @db.VarChar(100)
-  entity    String?  @db.VarChar(100)
+  id        BigInt        @id @default(autoincrement())
+  /// null when a tenant acted through the portal (tenantId is set instead)
+  userId    BigInt?
+  user      User?         @relation(fields: [userId], references: [id])
+  tenantId  BigInt?
+  tenant    Tenant?       @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  orgId     BigInt?
+  org       Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  action    String        @db.VarChar(100)
+  entity    String?       @db.VarChar(100)
   entityId  String?
   metadata  Json?
-  ipAddress String?  @db.VarChar(45)
-  userAgent String?  @db.Text
-  createdAt DateTime @default(now())
+  ipAddress String?       @db.VarChar(45)
+  userAgent String?       @db.Text
+  createdAt DateTime      @default(now())
 
   @@index([userId])
   @@index([createdAt])
+  @@index([orgId, createdAt])
   @@map("audit_logs")
 }
 
@@ -262,8 +321,9 @@ model Building {
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
-  floors   Floor[]
-  expenses Expense[]
+  floors        Floor[]
+  expenses      Expense[]
+  buildingBills BuildingBill[]
 
   @@index([orgId])
   @@map("buildings")
@@ -329,6 +389,8 @@ model Tenant {
   firstName        String       @db.VarChar(100)
   lastName         String       @db.VarChar(100)
   phone            String?      @db.VarChar(20)
+  /// 8801XXXXXXXXX (normalizeBdPhone); the tenant portal logs in by this
+  phoneNormalized  String?      @db.VarChar(13)
   email            String?      @db.VarChar(255)
   nid              String?      @db.VarChar(50)
   passport         String?      @db.VarChar(50)
@@ -348,10 +410,16 @@ model Tenant {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
-  invoices   Invoice[]
-  agreements Agreement[]
+  invoices    Invoice[]
+  agreements  Agreement[]
+  maintenance MaintenanceRequest[]
+  documents   Document[]
+  auditLogs   AuditLog[]
+  claims      PaymentClaim[]
+  notices     NoticeRequest[]
 
   @@index([orgId])
+  @@index([phoneNormalized])
   @@map("tenants")
 }
 
@@ -367,15 +435,18 @@ model BillType {
   fixedCharge       Decimal?     @db.Decimal(10, 2)
   demandChargePerKw Decimal?     @db.Decimal(10, 2)
   vatPercent        Decimal?     @db.Decimal(5, 2)
+  /// how a SHARED building bill is divided
+  split             SplitRule?
   appliesToAll      Boolean      @default(true)
   isActive          Boolean      @default(true)
   sortOrder         Int          @default(0)
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
-  flatCharges  FlatCharge[]
-  entries      BillEntry[]
-  invoiceItems InvoiceItem[]
+  flatCharges   FlatCharge[]
+  entries       BillEntry[]
+  invoiceItems  InvoiceItem[]
+  buildingBills BuildingBill[]
 
   @@unique([orgId, name])
   @@map("bill_types")
@@ -451,6 +522,7 @@ model Invoice {
   payments      Payment[]
   items         InvoiceItem[]
   notifications Notification[]
+  claims        PaymentClaim[]
 
   @@unique([agreementId, periodStart])
   @@index([flatId, month, year])
@@ -501,6 +573,7 @@ model Payment {
   handoverId    BigInt?
   handover      CashHandover?  @relation(fields: [handoverId], references: [id], onDelete: SetNull)
   notifications Notification[]
+  claim         PaymentClaim?
 
   @@unique([orgId, receiptNo])
   @@index([invoiceId])
@@ -522,6 +595,8 @@ model Expense {
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 
+  maintenance MaintenanceRequest[]
+
   @@index([orgId, date])
   @@index([orgId, category])
   @@index([buildingId])
@@ -537,9 +612,11 @@ model Asset {
   kind      AssetKind
   createdAt DateTime     @default(now())
 
-  unit       Flat?
-  agreements Agreement[]
-  invoices   Invoice[]
+  unit        Flat?
+  agreements  Agreement[]
+  invoices    Invoice[]
+  maintenance MaintenanceRequest[]
+  documents   Document[]
 
   @@index([orgId, kind])
   @@map("assets")
@@ -575,6 +652,8 @@ model Agreement {
   revisions RateRevision[]
   deposits  DepositEntry[]
   invoices  Invoice[]
+  documents Document[]
+  notices   NoticeRequest[]
 
   @@index([orgId, status])
   @@index([assetId, status])
@@ -668,4 +747,172 @@ model CashHandover {
 
   @@index([orgId, date])
   @@map("cash_handovers")
+}
+
+/// A building-wide bill for one month (WASA, common electricity...). Saving it splits the total
+/// into each billable unit's BillEntry.amount, so invoicing works unchanged.
+model BuildingBill {
+  id         BigInt       @id @default(autoincrement())
+  orgId      BigInt
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  buildingId BigInt
+  building   Building     @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  billTypeId BigInt
+  billType   BillType     @relation(fields: [billTypeId], references: [id], onDelete: Cascade)
+  month      Int
+  year       Int
+  total      Decimal      @db.Decimal(12, 2)
+  note       String?      @db.VarChar(255)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@unique([buildingId, billTypeId, month, year])
+  @@index([orgId, year, month])
+  @@map("building_bills")
+}
+
+model MaintenanceRequest {
+  id           BigInt            @id @default(autoincrement())
+  orgId        BigInt
+  org          Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  assetId      BigInt
+  asset        Asset             @relation(fields: [assetId], references: [id])
+  tenantId     BigInt?
+  tenant       Tenant?           @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  title        String            @db.VarChar(200)
+  description  String?           @db.Text
+  category     String?           @db.VarChar(50)
+  /// LOW | NORMAL | URGENT
+  priority     String            @default("NORMAL") @db.VarChar(10)
+  status       MaintenanceStatus @default(NEW)
+  assignedToId BigInt?
+  assignedTo   Membership?       @relation("MaintenanceAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  createdById  BigInt?
+  createdBy    Membership?       @relation("MaintenanceCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  cost         Decimal?          @db.Decimal(12, 2)
+  expenseId    BigInt?
+  expense      Expense?          @relation(fields: [expenseId], references: [id], onDelete: SetNull)
+  /// set when the unit was marked UNDER_MAINTENANCE by this request
+  blocksUnit   Boolean           @default(false)
+  resolvedAt   DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  photos Document[]
+
+  @@index([orgId, status])
+  @@index([assetId])
+  @@map("maintenance_requests")
+}
+
+/// A stored file. Served only through GET /documents/:id/file (auth + org check).
+model Document {
+  id            BigInt              @id @default(autoincrement())
+  orgId         BigInt
+  org           Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  kind          DocumentKind        @default(OTHER)
+  name          String              @db.VarChar(200)
+  /// file name inside backend/uploads
+  path          String              @db.VarChar(255)
+  mime          String?             @db.VarChar(100)
+  size          Int?
+  tenantId      BigInt?
+  tenant        Tenant?             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assetId       BigInt?
+  asset         Asset?              @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  agreementId   BigInt?
+  agreement     Agreement?          @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  maintenanceId BigInt?
+  maintenance   MaintenanceRequest? @relation(fields: [maintenanceId], references: [id], onDelete: Cascade)
+  expiresAt     DateTime?           @db.Date
+  uploadedById  BigInt?
+  uploadedBy    Membership?         @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime            @default(now())
+
+  @@index([orgId, expiresAt])
+  @@index([tenantId])
+  @@index([agreementId])
+  @@index([assetId])
+  @@index([maintenanceId])
+  @@map("documents")
+}
+
+/// One-time login codes for the tenant portal (phone = 8801XXXXXXXXX). Rows also count requests for throttling.
+model PortalOtp {
+  id        BigInt   @id @default(autoincrement())
+  phone     String   @db.VarChar(13)
+  codeHash  String   @db.VarChar(100)
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([phone, createdAt])
+  @@map("portal_otps")
+}
+
+/// A tenant's logged-in device. The refresh token is stored hashed; deleting the row logs that device out.
+model PortalSession {
+  id          BigInt   @id @default(autoincrement())
+  phone       String   @db.VarChar(13)
+  refreshHash String   @unique @db.VarChar(64)
+  expiresAt   DateTime
+  userAgent   String?  @db.VarChar(255)
+  createdAt   DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  @@index([phone])
+  @@map("portal_sessions")
+}
+
+/// "I paid by bKash": a tenant's report of a payment made outside the app, for the owner to confirm.
+model PaymentClaim {
+  id            BigInt        @id @default(autoincrement())
+  orgId         BigInt
+  org           Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  invoiceId     BigInt
+  invoice       Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  tenantId      BigInt
+  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  amount        Decimal       @db.Decimal(12, 2)
+  method        PaymentMethod
+  transactionId String        @db.VarChar(100)
+  paidOn        DateTime      @db.Date
+  note          String?       @db.VarChar(255)
+  status        ClaimStatus   @default(PENDING)
+  paymentId     BigInt?       @unique
+  payment       Payment?      @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  reviewedById  BigInt?
+  reviewedBy    Membership?   @relation("ClaimReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewNote    String?       @db.VarChar(255)
+  reviewedAt    DateTime?
+  createdAt     DateTime      @default(now())
+
+  @@unique([orgId, method, transactionId])
+  @@index([orgId, status])
+  @@index([tenantId])
+  @@map("payment_claims")
+}
+
+/// A tenant's request to move out, for the owner to accept (agreement goes on notice) or decline.
+model NoticeRequest {
+  id           BigInt              @id @default(autoincrement())
+  orgId        BigInt
+  org          Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  agreementId  BigInt
+  agreement    Agreement           @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  tenantId     BigInt
+  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  noticeDate   DateTime            @db.Date
+  moveOutDate  DateTime            @db.Date
+  reason       String?             @db.VarChar(500)
+  status       NoticeRequestStatus @default(PENDING)
+  reviewedById BigInt?
+  reviewedBy   Membership?         @relation("NoticeReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewNote   String?             @db.VarChar(255)
+  reviewedAt   DateTime?
+  createdAt    DateTime            @default(now())
+
+  @@index([orgId, status])
+  @@index([agreementId, status])
+  @@map("notice_requests")
 }

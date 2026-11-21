@@ -16,6 +16,7 @@ import { formatBDT, apiError } from "@/utils/format";
 import { MONTH_NAMES } from "@/types/invoice";
 import type { BillType, BillingRow, BillingCharge, EntryValues } from "@/types/billType";
 import { INVOICE_STATUS } from "@/theme";
+import { BuildingBillsPanel } from "./components/BuildingBillsPanel";
 
 type Draft = Pick<EntryValues, "previousReading" | "currentReading" | "amount">;
 const key = (flatId: number, billTypeId: number) => `${flatId}:${billTypeId}`;
@@ -78,7 +79,7 @@ export const MonthlyBillingPage = () => {
         const bt = data.billTypes[i];
         const r = compute(bt, row, c);
         if (r) t += r.amount;
-        if (c.applies && ["METERED", "SLAB", "MANUAL"].includes(bt.calcMethod)) {
+        if (c.applies && ["METERED", "SLAB", "MANUAL", "SHARED"].includes(bt.calcMethod)) {
           needed++;
           if (!r) pending++;
         }
@@ -167,6 +168,8 @@ export const MonthlyBillingPage = () => {
         </Grid>
       </Grid>
 
+      {data && <BuildingBillsPanel month={month} year={year} data={data} locked={data.rows.length > 0 && data.rows.every((r) => !!r.invoice)} />}
+
       {dirty && <Alert severity="info" sx={{ mb: 2 }}>You have unsaved changes. They are saved automatically when you generate invoices.</Alert>}
 
       {isLoading ? (
@@ -242,9 +245,9 @@ export const MonthlyBillingPage = () => {
                               value={d.amount ?? ""} onChange={(e) => setDraft(row, c, { amount: toNum(e.target.value) })}
                             />
                           )}
-                          <Tooltip title={r?.detail ?? ""} placement="bottom-start">
+                          <Tooltip title={(bt.calcMethod === "SHARED" && c.entry?.note) || r?.detail || ""} placement="bottom-start">
                             <Typography variant="body2" sx={{ mt: metered || bt.calcMethod === "MANUAL" ? 0.5 : 0, fontWeight: 600, color: r ? "text.primary" : "warning.main" }}>
-                              {r ? formatBDT(r.amount) : metered ? "Reading needed" : "Not entered"}
+                              {r ? formatBDT(r.amount) : metered ? "Reading needed" : bt.calcMethod === "SHARED" ? "Building bill needed" : "Not entered"}
                             </Typography>
                           </Tooltip>
                         </TableCell>

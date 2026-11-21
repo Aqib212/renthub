@@ -12,6 +12,7 @@ import { agreementApi, AGREEMENT_STATUS, fmtDate } from "@/api/agreement";
 import { useCurrentMembership } from "@/store/authStore";
 import { apiError, formatBDT } from "@/utils/format";
 import type { Tenant } from "@/types/tenant";
+import { DocumentsCard } from "@/components/DocumentsCard";
 
 type Member = { name: string; relation?: string; age?: number; nid?: string };
 
@@ -48,7 +49,15 @@ export const TenantProfilePage = () => {
         <PageHeader
           title={`${t.firstName} ${t.lastName}`}
           subtitle={current?.unit ? `${current.unit.building.name} · ${current.unit.name} since ${fmtDate(current.startDate)}` : "No running agreement"}
-          actions={<Button variant="contained" startIcon={<PrintOutlined />} onClick={() => window.print()}>Print CIMS form</Button>}
+          actions={<>
+            {t.phone && (
+              <Button variant="outlined" onClick={() => {
+                navigator.clipboard?.writeText(`${window.location.origin}/portal/login?phone=${encodeURIComponent(t.phone ?? "")}`);
+                toast.success("Portal link copied. Send it to the tenant; they log in with an SMS code.");
+              }}>Copy portal link</Button>
+            )}
+            <Button variant="contained" startIcon={<PrintOutlined />} onClick={() => window.print()}>Print CIMS form</Button>
+          </>}
         />
         <Grid container spacing={2.5}>
           <Grid item xs={12} md={5}>
@@ -98,6 +107,9 @@ export const TenantProfilePage = () => {
                 <Button variant="outlined" sx={{ mt: 1.5 }} disabled={save.isPending} onClick={() => save.mutate()}>Save household</Button>
               </CardContent>
             </Card>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <DocumentsCard link={{ tenantId: Number(id) }} defaultKind="NID" />
           </Grid>
           <Grid item xs={12}>
             <Card>

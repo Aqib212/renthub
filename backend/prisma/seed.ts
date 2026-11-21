@@ -2,6 +2,7 @@ import { PrismaClient, Prisma, InvoiceStatus, ExpenseCategory } from "@prisma/cl
 import bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
 import { formatReceiptNo } from "../src/shared/notify/collect";
+import { normalizeBdPhone } from "../src/shared/notify/phone";
 
 const prisma = new PrismaClient();
 
@@ -9,6 +10,13 @@ async function main() {
   console.log("🌱 Seeding database...");
 
   // Clean existing data in dependency order
+  await prisma.portalSession.deleteMany();
+  await prisma.portalOtp.deleteMany();
+  await prisma.paymentClaim.deleteMany();
+  await prisma.noticeRequest.deleteMany();
+  await prisma.document.deleteMany();
+  await prisma.maintenanceRequest.deleteMany();
+  await prisma.buildingBill.deleteMany();
   await prisma.notification.deleteMany();
   await prisma.payment.deleteMany();
   await prisma.cashHandover.deleteMany();
@@ -266,12 +274,13 @@ async function main() {
   const t3 = await prisma.tenant.create({
     data: {
       orgId: org.id,
-      firstName: "Shahinur",
-      lastName: "Rahman",
+      kind: "COMPANY",
+      firstName: "Meghna Pharma",
+      lastName: "Ltd.",
       phone: "01755555555",
-      email: "shahinur@email.com",
-      occupation: "Doctor",
-      office: "DMCH",
+      email: "admin@meghnapharma.example",
+      occupation: "Guest house for staff",
+      office: "Tejgaon, Dhaka",
     },
   });
 
@@ -291,6 +300,7 @@ async function main() {
   const a1 = await agree(flatG1, t1.id, "2024-01-01", 45000);
   const a2 = await agree(flatF1, t2.id, "2024-03-01", 75000);
   const a3 = await agree(flatB2G, t3.id, "2024-06-01", 54000);
+  await prisma.agreement.update({ where: { id: a3.id }, data: { tdsPercent: 5 } }); // company tenant withholds 5% TDS
   const a4 = await agree(flatB2F, t4.id, "2025-07-01", 60000); // ৳30,000 rent: bank-only (NBR)
 
   // ==============================
@@ -456,6 +466,50 @@ async function main() {
         },
       });
     }
+  });
+
+  // ==============================
+  // 7b. PHASE 4: shared building bill, maintenance
+  // ==============================
+  // WASA bill for Hasan Tower, June, split equally between the two let flats (as PUT /bill-entries/building-bills does)
+  const btWasa = await bt({ name: "WASA (building)", calcMethod: "SHARED", split: "EQUAL", sortOrder: 6 });
+  await prisma.buildingBill.create({ data: { orgId: org.id, buildingId: building1.id, billTypeId: btWasa.id, month: 6, year: 2026, total: 6000, note: "WASA June bill" } });
+  await prisma.billEntry.createMany({
+    data: [flatG1, flatF1].map((f) => ({ flatId: f.id, billTypeId: btWasa.id, month: 6, year: 2026, amount: 3000, note: "৳6,000 ÷ 2 units" })),
+  });
+
+  const ownerMember = await prisma.membership.findFirstOrThrow({ where: { orgId: org.id, role: "OWNER" } });
+  const repairs = await prisma.expense.create({
+    data: { orgId: org.id, buildingId: building1.id, category: "REPAIRS", amount: 3500, description: "Repaint and fix bathroom door (2-A)", date: new Date("2026-06-12") },
+  });
+  await prisma.maintenanceRequest.create({
+    data: { orgId: org.id, assetId: flatF1.assetId, tenantId: t2.id, title: "Kitchen tap leaking", category: "Plumbing", status: "NEW", createdById: caretakerMember.id },
+  });
+  await prisma.maintenanceRequest.create({
+    data: {
+      orgId: org.id, assetId: flatG1.assetId, tenantId: t1.id, title: "AC not cooling in bedroom", category: "Electrical", priority: "URGENT",
+      status: "IN_PROGRESS", assignedToId: caretakerMember.id, createdById: ownerMember.id,
+    },
+  });
+  await prisma.maintenanceRequest.create({
+    data: {
+      orgId: org.id, assetId: flatF2.assetId, title: "Repaint and fix bathroom door", category: "Painting", status: "DONE",
+      cost: 3500, expenseId: repairs.id, createdById: ownerMember.id, resolvedAt: new Date("2026-06-12"),
+    },
+  });
+
+  // ==============================
+  // 7c. PHASE 5: tenant portal (phones are normalised by the app's Prisma hook; this script uses its own client)
+  // ==============================
+  for (const t of await prisma.tenant.findMany({ where: { phone: { not: null } } })) {
+    await prisma.tenant.update({ where: { id: t.id }, data: { phoneNormalized: normalizeBdPhone(t.phone) } });
+  }
+  const juneB2F = await prisma.invoice.findFirstOrThrow({ where: { agreementId: a4.id, month: 6, year: 2026 } });
+  await prisma.paymentClaim.create({
+    data: { orgId: org.id, invoiceId: juneB2F.id, tenantId: t4.id, amount: 10000, method: "BKASH", transactionId: "9XK2BKASHDEMO", paidOn: new Date("2026-06-08T00:00:00Z"), note: "Part payment" },
+  });
+  await prisma.noticeRequest.create({
+    data: { orgId: org.id, agreementId: a1.id, tenantId: t1.id, noticeDate: new Date("2026-11-15T00:00:00Z"), moveOutDate: new Date("2027-01-31T00:00:00Z"), reason: "Moving to Chattogram for work" },
   });
 
   // ==============================

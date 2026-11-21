@@ -22,6 +22,9 @@ export const updateOrgSchema = z.object({
       dueDay: z.number().int().min(1).max(28).optional(),
       noticeMonths: z.number().int().min(1).max(6).optional(),
       sms: z.object({ enabled: z.boolean().optional(), reminders: z.boolean().optional() }).optional(),
+      agreementClauses: z.array(z.string().trim().min(1).max(1000)).max(30).optional(),
+      portal: z.object({ enabled: z.boolean().optional() }).optional(),
+      payInfo: z.string().max(1000).optional(),
     })
     .optional(),
 });
