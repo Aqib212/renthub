@@ -53,6 +53,8 @@ export interface Tenancy {
   status: "ACTIVE" | "NOTICE" | "ENDED";
   org: { id: number; name: string; payInfo: string };
   unit: { name: string; floorName: string; building: { name: string; address: string | null } } | null;
+  vehicle?: { regNo: string; type: string } | null;
+  cycle?: "MONTHLY" | "DAILY";
   rent: number;
   dueDay: number;
   startDate: string;

@@ -16,6 +16,7 @@ export interface MaintenanceRequest {
   resolvedAt: string | null;
   createdAt: string;
   unit: { id: number; name: string; status: string; floorName: string; building: { id: number; name: string } } | null;
+  vehicle?: { id: number; regNo: string; type: string; status: string } | null;
   tenant: { id: number; name: string; phone: string | null } | null;
   assignedTo: { id: number; name: string } | null;
   createdBy: { id: number; name: string } | null;
@@ -24,6 +25,7 @@ export interface MaintenanceRequest {
 
 export interface MaintenanceInput {
   flatId?: number;
+  vehicleId?: number;
   title?: string;
   description?: string | null;
   category?: string | null;
@@ -38,7 +40,7 @@ export interface MaintenanceInput {
 const d = <T>(p: Promise<{ data: { data: T } }>) => p.then((r) => r.data.data);
 
 export const maintenanceApi = {
-  list: (params: { status?: MaintenanceStatus | "OPEN"; buildingId?: number; flatId?: number; page?: number; limit?: number }) =>
+  list: (params: { status?: MaintenanceStatus | "OPEN"; buildingId?: number; flatId?: number; vehicleId?: number; page?: number; limit?: number }) =>
     d<{ rows: MaintenanceRequest[]; counts: Partial<Record<MaintenanceStatus, number>> }>(client.get("/maintenance", { params })),
   create: (body: MaintenanceInput) => d<MaintenanceRequest>(client.post("/maintenance", body)),
   update: (id: number, body: MaintenanceInput) => d<MaintenanceRequest>(client.patch(`/maintenance/${id}`, body)),

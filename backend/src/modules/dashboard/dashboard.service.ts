@@ -1,6 +1,7 @@
 import { prisma } from "../../shared/prisma";
 import { toNumberId } from "../../shared/utils/helpers";
 import { invoiceNo } from "../invoice/invoice.service";
+import { assetVehicle, unitName, unitPlace } from "../../shared/utils/asset";
 
 function toNumber(val: unknown): number {
   if (val === null || val === undefined) return 0;
@@ -57,7 +58,7 @@ export class DashboardService {
         where: { orgId: toNumberId(orgId) },
         orderBy: { date: "desc" },
         take: 5,
-        include: { invoice: { select: { flat: { select: { name: true } } } } },
+        include: { invoice: { select: { flat: { select: { name: true } }, asset: assetVehicle } } },
       }),
       prisma.invoice.count({
         where: { orgId: toNumberId(orgId), carriedForward: false, status: { in: ["PENDING", "OVERDUE", "PARTIALLY_PAID"] } },
@@ -87,13 +88,12 @@ export class DashboardService {
 
     // Outstanding by flat
     const outstandingRows = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT f.name as fn, SUM(i.dueAmount) as due
+      `SELECT COALESCE(f.name, CONCAT(v.regNo, ' (', v.type, ')')) as fn, SUM(i.dueAmount) as due
        FROM invoices i
-       JOIN flats f ON f.id = i.flatId
-       JOIN floors fl ON fl.id = f.floorId
-       JOIN buildings b ON b.id = fl.buildingId
+       LEFT JOIN flats f ON f.id = i.flatId
+       LEFT JOIN vehicles v ON v.assetId = i.assetId
        WHERE i.orgId = ? AND i.status != 'PAID' AND i.carriedForward = false
-       GROUP BY f.name ORDER BY due DESC`,
+       GROUP BY fn ORDER BY due DESC`,
       toNumberId(orgId)
     );
 
@@ -138,6 +138,7 @@ export class DashboardService {
       take: 8,
       include: {
         flat: { select: { name: true } },
+        asset: assetVehicle,
         tenant: { select: { firstName: true, lastName: true, phone: true } },
       },
     });
@@ -180,7 +181,7 @@ export class DashboardService {
         invoiceNo: invoiceNo(i),
         month: i.month,
         year: i.year,
-        flatName: i.flat.name,
+        flatName: unitName(i),
         tenantName: i.tenant ? `${i.tenant.firstName} ${i.tenant.lastName}` : null,
         tenantPhone: i.tenant?.phone ?? null,
         dueAmount: toNumber(i.dueAmount),
@@ -191,7 +192,7 @@ export class DashboardService {
         amount: toNumber(p.amount),
         method: p.method,
         date: p.date,
-        flatName: p.invoice.flat.name,
+        flatName: unitName(p.invoice),
         transactionId: p.transactionId,
       })),
     };

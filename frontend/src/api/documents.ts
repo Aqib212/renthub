@@ -1,6 +1,6 @@
 import client from "./client";
 
-export type DocumentKind = "NID" | "AGREEMENT" | "PHOTO" | "UTILITY" | "OTHER";
+export type DocumentKind = "NID" | "AGREEMENT" | "PHOTO" | "UTILITY" | "OTHER" | "REGISTRATION" | "FITNESS" | "TAX_TOKEN" | "ROUTE_PERMIT" | "INSURANCE" | "LICENCE" | "ENLISTMENT";
 export interface VaultDocument {
   id: number;
   kind: DocumentKind;
@@ -19,6 +19,13 @@ export const DOCUMENT_KINDS: Record<DocumentKind, string> = {
   PHOTO: "Photo",
   UTILITY: "Utility paper",
   OTHER: "Other",
+  REGISTRATION: "Registration (blue book)",
+  FITNESS: "Fitness certificate",
+  TAX_TOKEN: "Tax token",
+  ROUTE_PERMIT: "Route permit",
+  INSURANCE: "Insurance",
+  LICENCE: "Driving licence",
+  ENLISTMENT: "Ride-share enlistment",
 };
 
 export const documentApi = {

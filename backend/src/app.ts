@@ -25,6 +25,7 @@ import documentRoutes from "./modules/document/document.routes";
 import auditRoutes from "./modules/audit/audit.routes";
 import paymentClaimRoutes from "./modules/payment-claim/payment-claim.routes";
 import portalRoutes from "./modules/portal/portal.routes";
+import vehicleRoutes, { jamaRouter } from "./modules/vehicle/vehicle.routes";
 import { startScheduledTasks } from "./scheduledTasks";
 
 const app = express();
@@ -60,6 +61,8 @@ app.use("/api/v1/maintenance", maintenanceRoutes);
 app.use("/api/v1/documents", documentRoutes);
 app.use("/api/v1/audit-logs", auditRoutes);
 app.use("/api/v1/payment-claims", paymentClaimRoutes);
+app.use("/api/v1/vehicles", vehicleRoutes);
+app.use("/api/v1/jama", jamaRouter);
 app.use("/api/v1/portal", globalRateLimiter, portalRoutes);
 
 app.get("/api/v1/health", (_req, res) => {

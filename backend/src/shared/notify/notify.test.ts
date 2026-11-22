@@ -58,3 +58,31 @@ test("receipt numbers and amount in words", () => {
   assert.equal(amountInWords(25000000), "Two crore fifty lakh taka only");
   assert.equal(amountInWords(905), "Nine hundred five taka only");
 });
+
+import { currentDocs, daysLeft, expiryStage } from "./expiry";
+
+test("document expiry: reminder stages and renewals", () => {
+  const d = (s: string) => new Date(`${s}T00:00:00.000Z`);
+  const today = d("2026-12-01");
+  assert.equal(daysLeft(d("2026-12-31"), today), 30);
+  assert.equal(expiryStage(d("2026-12-31"), today), 30);
+  assert.equal(expiryStage(d("2026-12-08"), today), 7);
+  assert.equal(expiryStage(d("2026-12-01"), today), 0);
+  assert.equal(expiryStage(d("2026-12-02"), today), null);
+  assert.equal(expiryStage(d("2026-11-30"), today), null); // already expired: listed, not texted again
+  // a renewal supersedes the old document of the same kind on the same vehicle
+  const docs = [
+    { id: 1, kind: "INSURANCE", assetId: 5, expiresAt: d("2026-12-05") },
+    { id: 2, kind: "INSURANCE", assetId: 5, expiresAt: d("2027-12-05") },
+    { id: 3, kind: "FITNESS", assetId: 5, expiresAt: d("2026-12-08") },
+    { id: 4, kind: "INSURANCE", assetId: 6, expiresAt: d("2026-12-05") },
+    { id: 5, kind: "OTHER", assetId: 5, expiresAt: null },
+  ];
+  assert.deepEqual(currentDocs(docs).map((x) => x.id).sort(), [2, 3, 4]);
+});
+
+test("document expiry SMS says today or the days left", () => {
+  assert.match(render("DOC_EXPIRY", "EN", { ...SAMPLE, daysLeft: 0 }), /expires today/);
+  assert.match(render("DOC_EXPIRY", "BN", { ...SAMPLE, daysLeft: 0 }), /আজ শেষ/);
+  assert.match(render("DOC_EXPIRY", "EN", SAMPLE), /7 days left/);
+});

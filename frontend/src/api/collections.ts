@@ -16,8 +16,9 @@ export interface Receipt {
   lang: "BN" | "EN";
   invoice: { invoiceNo: string; month: number; year: number; totalAmount: number; paidAmount: number; dueAmount: number };
   tenant: { name: string; phone: string | null } | null;
-  unit: { name: string; floorName: string };
-  building: { name: string; address: string | null; holdingNumber: string | null };
+  /** a vehicle receipt: name = the reg no label, no floor and no building */
+  unit: { name: string; floorName: string | null };
+  building: { name: string; address: string | null; holdingNumber: string | null } | null;
   owner: { name: string; phone: string | null; email: string | null };
   shareToken?: string | null;
 }
@@ -26,7 +27,7 @@ export type NotificationStatus = "QUEUED" | "SENT" | "FAILED" | "SKIPPED";
 export interface OutboxRow {
   id: number;
   to: string | null;
-  template: "RECEIPT" | "RENT_DUE" | "DUE_TODAY" | "OVERDUE" | "CLAIM_REJECTED" | "NOTICE_ACCEPTED" | "NOTICE_DECLINED";
+  template: "RECEIPT" | "RENT_DUE" | "DUE_TODAY" | "OVERDUE" | "CLAIM_REJECTED" | "NOTICE_ACCEPTED" | "NOTICE_DECLINED" | "DOC_EXPIRY";
   lang: "BN" | "EN";
   body: string | null;
   status: NotificationStatus;

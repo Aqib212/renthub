@@ -10,6 +10,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { maintenanceApi, MAINTENANCE_STATUS, type MaintenanceRequest, type MaintenanceStatus, type Priority } from "@/api/maintenance";
 import { documentApi } from "@/api/documents";
 import { flatApi } from "@/api/flat";
+import { vehicleApi } from "@/api/vehicles";
+import { useSearchParams } from "react-router-dom";
 import { useCurrentMembership } from "@/store/authStore";
 import { useT } from "@/i18n";
 import { apiError, formatBDT, formatDate } from "@/utils/format";
@@ -27,9 +29,11 @@ export const MaintenancePage = () => {
   const role = useCurrentMembership()?.role;
   const canWrite = role === "OWNER" || role === "MANAGER" || role === "CARETAKER";
 
+  const [params] = useSearchParams();
+  const vehicleId = params.get("vehicleId") ? Number(params.get("vehicleId")) : undefined;
   const { data } = useQuery({
-    queryKey: ["maintenance", tab],
-    queryFn: () => maintenanceApi.list({ status: tab === "ALL" ? undefined : tab, limit: 100 }),
+    queryKey: ["maintenance", tab, vehicleId],
+    queryFn: () => maintenanceApi.list({ status: tab === "ALL" ? undefined : tab, vehicleId, limit: 100 }),
   });
   const counts = data?.counts ?? {};
   const countOf = (k: (typeof TABS)[number]) =>
@@ -74,7 +78,7 @@ const RequestCard = ({ r, lang, onOpen }: { r: MaintenanceRequest; lang: "en" | 
           <Box sx={{ minWidth: 0 }}>
             <Typography fontWeight={700}>{r.title}</Typography>
             <Typography variant="body2" color="text.secondary">
-              {r.unit ? `${r.unit.building.name} · ${r.unit.name}` : "–"}{r.tenant ? ` · ${r.tenant.name}` : ""}
+              {whereOf(r) || "–"}{r.tenant ? ` · ${r.tenant.name}` : ""}
             </Typography>
           </Box>
           <Chip size="small" sx={{ bgcolor: tone(r.status).bg, color: tone(r.status).fg, flexShrink: 0 }} label={t(`maint.status.${r.status}`)} />
@@ -96,12 +100,15 @@ const RequestCard = ({ r, lang, onOpen }: { r: MaintenanceRequest; lang: "en" | 
 };
 
 type Flat = { id: number; name: string; status: string; floor: { name: string; building: { name: string } } };
+/** A unit or a vehicle the request is about. */
+type Target = { key: string; flatId?: number; vehicleId?: number; label: string; free: boolean };
+const whereOf = (r: MaintenanceRequest) => (r.unit ? `${r.unit.building.name} · ${r.unit.name}` : r.vehicle ? `${r.vehicle.regNo} (${r.vehicle.type})` : "");
 
 const RequestDialog = ({ request, onClose }: { request: MaintenanceRequest | null; onClose: () => void }) => {
   const { t } = useT();
   const qc = useQueryClient();
   const [form, setForm] = useState({
-    flatId: request?.unit?.id ?? 0,
+    target: "",
     title: request?.title ?? "",
     description: request?.description ?? "",
     category: request?.category ?? "",
@@ -120,6 +127,11 @@ const RequestDialog = ({ request, onClose }: { request: MaintenanceRequest | nul
     queryFn: async () => ((await flatApi.getAllForOwner()).data.data as Flat[]),
     enabled: !request,
   });
+  const { data: vehicles = [] } = useQuery({ queryKey: ["vehicles"], queryFn: vehicleApi.list, enabled: !request });
+  const targets: Target[] = [
+    ...flats.map((f) => ({ key: `f${f.id}`, flatId: f.id, label: `${f.floor.building.name} · ${f.name}`, free: f.status === "VACANT" })),
+    ...vehicles.map((v) => ({ key: `v${v.id}`, vehicleId: v.id, label: `${v.regNo} (${v.type})`, free: v.status === "AVAILABLE" })),
+  ];
   const { data: staff = [] } = useQuery({ queryKey: ["maintenance-assignees"], queryFn: maintenanceApi.assignees });
 
   const save = useMutation({
@@ -138,7 +150,7 @@ const RequestDialog = ({ request, onClose }: { request: MaintenanceRequest | nul
             cost: form.cost === "" ? null : Number(form.cost),
             createExpense: form.status === "DONE" && !!form.cost && form.createExpense && !request.expenseId,
           })
-        : await maintenanceApi.create({ ...body, flatId: form.flatId, blocksUnit: form.blocksUnit });
+        : await maintenanceApi.create({ ...body, flatId: selected?.flatId, vehicleId: selected?.vehicleId, blocksUnit: form.blocksUnit });
       if (files.length) await maintenanceApi.addPhotos(saved.id, files);
       return saved;
     },
@@ -146,6 +158,7 @@ const RequestDialog = ({ request, onClose }: { request: MaintenanceRequest | nul
       toast.success(t("maint.saved"));
       qc.invalidateQueries({ queryKey: ["maintenance"] });
       qc.invalidateQueries({ queryKey: ["flats"] });
+      qc.invalidateQueries({ queryKey: ["vehicles"] });
       qc.invalidateQueries({ queryKey: ["expenses"] });
       onClose();
     },
@@ -156,7 +169,7 @@ const RequestDialog = ({ request, onClose }: { request: MaintenanceRequest | nul
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["maintenance"] }); qc.invalidateQueries({ queryKey: ["flats"] }); onClose(); },
     onError: (e) => toast.error(apiError(e)),
   });
-  const selectedFlat = flats.find((f) => f.id === form.flatId) ?? null;
+  const selected = targets.find((x) => x.key === form.target) ?? null;
 
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
@@ -164,13 +177,15 @@ const RequestDialog = ({ request, onClose }: { request: MaintenanceRequest | nul
       <DialogContent dividers>
         <Stack spacing={2}>
           {request ? (
-            <Typography color="text.secondary">{request.unit ? `${request.unit.building.name} · ${request.unit.name}` : ""}{request.tenant ? ` · ${request.tenant.name}` : ""}</Typography>
+            <Typography color="text.secondary">{whereOf(request)}{request.tenant ? ` · ${request.tenant.name}` : ""}</Typography>
           ) : (
             <Autocomplete
-              options={flats}
-              value={selectedFlat}
-              onChange={(_, f) => set({ flatId: f?.id ?? 0 })}
-              getOptionLabel={(f) => `${f.floor.building.name} · ${f.name}`}
+              options={targets}
+              value={selected}
+              onChange={(_, x) => set({ target: x?.key ?? "" })}
+              getOptionLabel={(x) => x.label}
+              groupBy={(x) => (x.vehicleId ? t("nav.vehicles") : t("maint.unit"))}
+              isOptionEqualToValue={(a, b) => a.key === b.key}
               renderInput={(p) => <TextField {...p} label={t("maint.unit")} required />}
             />
           )}
@@ -189,7 +204,7 @@ const RequestDialog = ({ request, onClose }: { request: MaintenanceRequest | nul
             <MenuItem value={0}>{t("maint.nobody")}</MenuItem>
             {staff.map((m) => <MenuItem key={m.id} value={m.id}>{m.name} ({t(`role.${m.role}` as any)})</MenuItem>)}
           </TextField>
-          {!request && selectedFlat?.status === "VACANT" && (
+          {!request && selected?.free && (
             <FormControlLabel control={<Checkbox checked={form.blocksUnit} onChange={(e) => set({ blocksUnit: e.target.checked })} />} label={t("maint.blocks")} />
           )}
           {request && (
@@ -218,7 +233,7 @@ const RequestDialog = ({ request, onClose }: { request: MaintenanceRequest | nul
           <IconButton aria-label="Delete request" onClick={() => remove.mutate()} sx={{ mr: "auto" }}><DeleteOutline /></IconButton>
         )}
         <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" disabled={save.isPending || !form.title.trim() || (!request && !form.flatId)} onClick={() => save.mutate()}>Save</Button>
+        <Button variant="contained" disabled={save.isPending || !form.title.trim() || (!request && !selected)} onClick={() => save.mutate()}>Save</Button>
       </DialogActions>
     </Dialog>
   );

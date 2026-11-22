@@ -18,6 +18,7 @@ export interface AgreementSummary {
   depositBalance: number;
   tenant: { id: number; firstName: string; lastName: string; phone: string | null; nid?: string | null; members?: number; lang?: "BN" | "EN"; permanentAddress?: string | null };
   unit: { id: number; name: string; floorName: string; building: { id: number; name: string } } | null;
+  vehicle?: { id: number; regNo: string; type: string; status: string } | null;
 }
 
 export interface AgreementDetail extends AgreementSummary {
@@ -46,7 +47,9 @@ export interface Settlement {
 }
 
 export interface NewAgreementInput {
-  flatId: number;
+  flatId?: number;
+  vehicleId?: number;
+  cycle?: "MONTHLY" | "DAILY";
   tenantId?: number;
   tenant?: { firstName: string; lastName: string; phone?: string; nid?: string; occupation?: string; members?: number };
   rate?: number;

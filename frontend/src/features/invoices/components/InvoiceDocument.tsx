@@ -37,7 +37,8 @@ export const InvoiceDocument = ({ invoice, lang = "en" }: { invoice: InvoiceDeta
     ? { text: t("inv.stamp.CARRIED"), color: muted }
     : STAMP_COLOR[invoice.status] && { text: t(`inv.stamp.${invoice.status}` as MessageKey), color: STAMP_COLOR[invoice.status] };
   const subtotal = invoice.items.reduce((s, it) => s + Number(it.amount), 0);
-  const address = [invoice.building.address, invoice.building.area, invoice.building.district].filter(Boolean).join(", ");
+  const b = invoice.building;
+  const address = b ? [b.address, b.area, b.district].filter(Boolean).join(", ") : "";
   const period = lang === "bn" ? `${BN_MONTHS[invoice.month - 1]} ${toBnDigits(invoice.year)}` : `${MONTH_NAMES[invoice.month - 1]} ${invoice.year}`;
 
   const sumRow = (label: string, value: string, opts: { strong?: boolean; color?: string; big?: boolean } = {}) => (
@@ -61,9 +62,9 @@ export const InvoiceDocument = ({ invoice, lang = "en" }: { invoice: InvoiceDeta
       {/* Header */}
       <Box sx={{ display: "flex", justifyContent: "space-between", gap: 3, flexWrap: "wrap" }}>
         <Box sx={{ minWidth: 0 }}>
-          <Typography sx={{ fontSize: 22, fontWeight: 700, color: accent, lineHeight: 1.2 }}>{invoice.building.name}</Typography>
+          <Typography sx={{ fontSize: 22, fontWeight: 700, color: accent, lineHeight: 1.2 }}>{b?.name ?? invoice.owner.name}</Typography>
           {address && <Typography sx={{ fontSize: 13, color: muted, mt: 0.5 }}>{address}</Typography>}
-          {invoice.building.holdingNumber && <Typography sx={{ fontSize: 13, color: muted }}>{t("inv.holding")}: {invoice.building.holdingNumber}</Typography>}
+          {b?.holdingNumber && <Typography sx={{ fontSize: 13, color: muted }}>{t("inv.holding")}: {b.holdingNumber}</Typography>}
           <Typography sx={{ fontSize: 13, mt: 1 }}>
             {t("inv.owner")}: <b>{invoice.owner.name}</b>{invoice.owner.phone ? ` · ${invoice.owner.phone}` : ""}
           </Typography>
@@ -87,9 +88,9 @@ export const InvoiceDocument = ({ invoice, lang = "en" }: { invoice: InvoiceDeta
         <Box sx={{ p: 2, bgcolor: "#f8fafc", borderRadius: 1.5, border: `1px solid ${line}` }}>
           <Typography sx={{ fontSize: 11, color: muted, fontWeight: 600, letterSpacing: "0.08em" }}>{t("inv.property").toUpperCase()}</Typography>
           <Typography sx={{ fontSize: 15, fontWeight: 700, mt: 0.5 }}>
-            {t("inv.flat")} {invoice.flat.name}{invoice.flat.flatNumber && invoice.flat.flatNumber !== invoice.flat.name ? ` (${invoice.flat.flatNumber})` : ""}
+            {b ? `${t("inv.flat")} ` : ""}{invoice.flat.name}{invoice.flat.flatNumber && invoice.flat.flatNumber !== invoice.flat.name ? ` (${invoice.flat.flatNumber})` : ""}
           </Typography>
-          <Typography sx={{ fontSize: 13, color: muted }}>{invoice.flat.floorName}, {invoice.building.name}</Typography>
+          {b && <Typography sx={{ fontSize: 13, color: muted }}>{invoice.flat.floorName}, {b.name}</Typography>}
         </Box>
       </Box>
 

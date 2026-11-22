@@ -20,6 +20,7 @@ import { Alert } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { claimsApi } from "@/features/payments/components/ClaimsPanel";
 import { agreementApi } from "@/api/agreement";
+import { FleetCards } from "@/features/vehicles/FleetCards";
 
 /** Things tenants sent from the portal that wait for staff. */
 const PortalInbox = () => {
@@ -77,6 +78,7 @@ export const DashboardPage = () => {
         }
       />
       <PortalInbox />
+      <FleetCards />
 
       <Grid container spacing={2} sx={{ mb: 2 }}>
         <Grid item xs={12} sm={6} lg={3}>

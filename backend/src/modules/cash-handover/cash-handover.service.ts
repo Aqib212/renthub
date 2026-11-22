@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "../../shared/prisma";
 import { audit } from "../../shared/audit";
 import { NotFoundError, ValidationError } from "../../shared/utils/errors";
+import { assetVehicle, unitName, unitPlace } from "../../shared/utils/asset";
 
 export const handoverSchema = z.object({
   fromMembershipId: z.coerce.number().int().positive(),
@@ -25,7 +26,7 @@ export class CashHandoverService {
       orderBy: { date: "asc" },
       include: {
         collectedBy: { select: { id: true, role: true, ...userName } },
-        invoice: { select: { month: true, year: true, flat: { select: { name: true } }, tenant: { select: { firstName: true, lastName: true } } } },
+        invoice: { select: { month: true, year: true, flat: { select: { name: true } }, asset: assetVehicle, tenant: { select: { firstName: true, lastName: true } } } },
       },
     });
     const byCollector = new Map<string, { membershipId: number; name: string; role: string; total: number; payments: unknown[] }>();
@@ -39,7 +40,7 @@ export class CashHandoverService {
         receiptNo: p.receiptNo,
         date: p.date,
         amount: Number(p.amount),
-        flatName: p.invoice.flat.name,
+        flatName: unitName(p.invoice),
         tenantName: p.invoice.tenant ? `${p.invoice.tenant.firstName} ${p.invoice.tenant.lastName}` : null,
         period: `${p.invoice.month}/${p.invoice.year}`,
       });

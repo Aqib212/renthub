@@ -36,6 +36,9 @@ import { SettingsPage } from "@/features/settings/SettingsPage";
 import { AgreementDeedPage } from "@/features/agreements/AgreementDeedPage";
 import { MaintenancePage } from "@/features/maintenance/MaintenancePage";
 import { ActivityPage } from "@/features/admin/ActivityPage";
+import { VehiclesPage } from "@/features/vehicles/VehiclesPage";
+import { VehicleDetailPage } from "@/features/vehicles/VehicleDetailPage";
+import { JamaSheetPage } from "@/features/vehicles/JamaSheetPage";
 import { PortalLayout } from "@/features/portal/PortalLayout";
 import { PortalLoginPage } from "@/features/portal/PortalLoginPage";
 import { PortalHomePage } from "@/features/portal/PortalHomePage";
@@ -86,6 +89,9 @@ export const AppRouter = () => {
           <Route path="/agreements/:id/deed" element={<AgreementDeedPage />} />
           <Route path="/maintenance" element={<MaintenancePage />} />
           <Route path="/activity" element={<ActivityPage />} />
+          <Route path="/vehicles" element={<VehiclesPage />} />
+          <Route path="/vehicles/:id" element={<VehicleDetailPage />} />
+          <Route path="/jama" element={<JamaSheetPage />} />
           <Route path="/buildings/:buildingId/floors/:floorId/flats/:flatId/tenants" element={<TenantListPage />} />
           <Route path="/billing" element={<MonthlyBillingPage />} />
           <Route path="/bill-types" element={<BillTypesPage />} />

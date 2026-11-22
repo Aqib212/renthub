@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { expiringDocs } from "../document/document.service";
+import { expiryStage } from "../../shared/notify/expiry";
 import { Prisma, Lang } from "@prisma/client";
 import { prisma } from "../../shared/prisma";
 import { env } from "../../config/env";
@@ -9,6 +11,7 @@ import { render, smsSegments, TEMPLATE_KEYS, SAMPLE, type TemplateKey, type Temp
 import { reminderFor } from "../../shared/notify/collect";
 import { settingsOf } from "../org/org.service";
 import { sendSms } from "./sms.sender";
+import { assetVehicle, unitName, unitPlace } from "../../shared/utils/asset";
 
 type Tx = Prisma.TransactionClient | typeof prisma;
 const BACKOFF_MIN = [5, 30, 120]; // retry after a failed send
@@ -33,7 +36,7 @@ export interface EnqueueInput {
 export async function enqueue(tx: Tx, n: EnqueueInput) {
   const to = normalizeBdPhone(n.to);
   // cheap check first (keeps the log quiet); the unique index below still settles races
-  if (n.dedupeKey && (await tx.notification.findUnique({ where: { dedupeKey: n.dedupeKey }, select: { id: true } }))) return;
+  if (n.dedupeKey && (await tx.notification.findUnique({ where: { dedupeKey: n.dedupeKey }, select: { id: true } }))) return false;
   try {
     await tx.notification.create({
       data: {
@@ -50,8 +53,9 @@ export async function enqueue(tx: Tx, n: EnqueueInput) {
         dedupeKey: n.dedupeKey,
       },
     });
+    return true;
   } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") return; // already queued
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") return false; // already queued
     throw e;
   }
 }
@@ -91,6 +95,7 @@ export async function drain(limit = 50) {
 const invoiceForReminder = {
   tenant: { select: { phone: true, lang: true } },
   flat: { select: { name: true, floor: { select: { building: { select: { name: true } } } } } },
+  asset: assetVehicle,
   org: { select: { name: true } },
 } satisfies Prisma.InvoiceInclude;
 
@@ -112,7 +117,7 @@ async function queueReminder(inv: ReminderInvoice, template: Exclude<TemplateKey
     dedupeKey,
     data: {
       org: inv.org.name,
-      unit: `${inv.flat.name}, ${inv.flat.floor.building.name}`,
+      unit: unitPlace(inv),
       amount: Number(inv.dueAmount),
       month: `${inv.year}-${String(inv.month).padStart(2, "0")}`,
       dueDate: inv.dueDate ? ymd(inv.dueDate) : undefined,
@@ -136,12 +141,46 @@ export async function queueDailyReminders(today = new Date()) {
         carriedForward: false,
         dueAmount: { gt: 0 },
         status: template === "OVERDUE" ? "OVERDUE" : { in: ["PENDING", "PARTIALLY_PAID", "OVERDUE"] },
+        // drivers pay jama in person every day: no rent reminders for daily agreements
+        NOT: { agreement: { cycle: "DAILY" } },
       },
       include: invoiceForReminder,
     });
     for (const inv of invoices) {
       await queueReminder(inv, template, `${template}:${inv.id}:${ymd(today)}`);
       queued++;
+    }
+  }
+  return { queued };
+}
+
+/** Daily: SMS the workspace owner about documents expiring in 30 days, in 7 days, or today. */
+export async function queueExpiryReminders(today: Date) {
+  const orgs = await prisma.organization.findMany({
+    select: {
+      id: true, name: true, settings: true,
+      memberships: { where: { role: "OWNER", isActive: true }, take: 1, orderBy: { createdAt: "asc" }, select: { user: { select: { phone: true } } } },
+    },
+  });
+  let queued = 0;
+  for (const org of orgs) {
+    const phone = org.memberships[0]?.user.phone;
+    if (!settingsOf(org.settings).sms.enabled || !phone) continue;
+    for (const d of await expiringDocs(Number(org.id), 30, today)) {
+      const stage = expiryStage(d.expiresAt!, today);
+      if (stage === null) continue;
+      const expiresOn = ymd(d.expiresAt!);
+      const added = await enqueue(prisma, {
+        orgId: org.id,
+        template: "DOC_EXPIRY",
+        to: phone,
+        // ponytail: owner SMS in Bangla; add an owner language setting if asked
+        lang: "BN",
+        // a renewal has another expiry date, so it is reminded afresh
+        dedupeKey: `doc:${d.id}:${expiresOn}:${stage}`,
+        data: { org: org.name, unit: d.owner?.label ?? "", amount: 0, document: d.name, expiresOn, daysLeft: stage },
+      });
+      if (added) queued++;
     }
   }
   return { queued };

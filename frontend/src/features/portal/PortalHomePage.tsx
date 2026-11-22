@@ -55,7 +55,7 @@ const TenancyCard = ({ x, lang }: { x: Tenancy; lang: "en" | "bn" }) => {
       <CardContent>
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
           <Box>
-            <Typography fontWeight={700}>{x.unit ? `${x.unit.name}, ${x.unit.building.name}` : x.org.name}</Typography>
+            <Typography fontWeight={700}>{x.unit ? `${x.unit.name}, ${x.unit.building.name}` : x.vehicle ? `${x.vehicle.regNo} (${x.vehicle.type})` : x.org.name}</Typography>
             <Typography variant="body2" color="text.secondary">{x.org.name}</Typography>
           </Box>
           <Chip size="small" sx={{ bgcolor: tone.bg, color: tone.fg }} label={t(`portal.status.${x.status}`)} />

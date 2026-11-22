@@ -4,9 +4,10 @@ import { audit } from "../../shared/audit";
 import { prisma } from "../../shared/prisma";
 import { NotFoundError, ConflictError, ValidationError } from "../../shared/utils/errors";
 import { toNumberId } from "../../shared/utils/helpers";
-import { loadBillingContext, billableFlatWhere } from "../bill-type/bill-type.service";
+import { loadBillingContext, billableFlatWhere, agreementsInMonth, agreementInclude, rentFor, type AgreementRow } from "../bill-type/bill-type.service";
 import type { UpdateInvoiceInput } from "./invoice.validation";
 import { monthPeriod } from "../../shared/utils/rental";
+import { assetVehicle, unitName } from "../../shared/utils/asset";
 
 type Tx = Prisma.TransactionClient;
 type InvoiceStatus = "PENDING" | "PAID" | "PARTIALLY_PAID" | "OVERDUE";
@@ -52,6 +53,43 @@ function previousOpenInvoice(client: Tx | typeof prisma, agreementId: bigint, pe
   });
 }
 
+/** A vehicle agreement's charge for one month, with that month's off days / jama overrides. */
+export async function vehicleCharge(client: Tx | typeof prisma, a: AgreementRow, month: number, year: number) {
+  const p = monthPeriod(month, year);
+  const days = a.cycle === "DAILY" ? await client.dayEntry.findMany({ where: { agreementId: a.id, date: { gte: p.start, lte: p.end } } }) : [];
+  return rentFor(a, month, year, days.map((d) => ({ date: d.date, amount: Number(d.amount) })));
+}
+
+type Charge = NonNullable<ReturnType<typeof rentFor>>;
+const tk = (n: number) => `৳${n.toLocaleString("en-IN")}`;
+/** The main line of a vehicle invoice: "Jama" (DAILY) or "Rent" (MONTHLY). */
+const vehicleItem = (cycle: string, c: Charge) =>
+  cycle === "DAILY"
+    ? { label: "Jama", detail: `${c.days} days × ${tk(c.rate)}${c.offDays ? ` · ${c.offDays} off day${c.offDays > 1 ? "s" : ""}` : ""}`, quantity: null, rate: null, amount: c.amount, sortOrder: 0 }
+    : { label: "Rent", detail: c.prorated ? `${c.days} of ${c.monthDays} days` : null, quantity: c.prorated ? c.days : null, rate: c.prorated ? r2(c.rate / c.monthDays) : null, amount: c.amount, sortOrder: 0 };
+
+/**
+ * Re-derive a vehicle invoice's Jama/Rent line after a day entry or the end date changed.
+ * A carried-forward month is closed: its balance already sits in the next invoice.
+ */
+export async function rebuildVehicleInvoice(tx: Tx, invoiceId: bigint) {
+  const inv = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, include: { agreement: { include: agreementInclude }, items: true } });
+  if (!inv.agreement) return;
+  if (inv.carriedForward) throw new ValidationError(`${inv.month}/${inv.year} is closed: its balance was carried to the next invoice`);
+  const c = await vehicleCharge(tx, inv.agreement, inv.month, inv.year);
+  const amount = c?.amount ?? 0;
+  const main = inv.items.find((i) => !i.billTypeId && (i.label === "Jama" || i.label === "Rent"));
+  const line = c ? vehicleItem(inv.agreement.cycle, c) : { label: main?.label ?? "Jama", detail: null, quantity: null, rate: null, amount: 0, sortOrder: 0 };
+  if (main) await tx.invoiceItem.update({ where: { id: main.id }, data: line });
+  else await tx.invoiceItem.create({ data: { ...line, invoiceId: inv.id } });
+  const others = inv.items.filter((i) => i.id !== main?.id).reduce((s, i) => s + num(i.amount), 0);
+  await tx.invoice.update({
+    where: { id: inv.id },
+    data: { rent: amount, totalAmount: Math.max(0, r2(others + amount + num(inv.previousDue) - num(inv.discount) + num(inv.fine))) },
+  });
+  await recalculateInvoice(inv.id, tx);
+}
+
 const detailInclude = {
   items: { orderBy: { sortOrder: "asc" } },
   payments: { orderBy: { date: "desc" } },
@@ -70,18 +108,21 @@ const detailInclude = {
       floor: { select: { name: true, building: { select: { name: true, address: true, area: true, district: true, holdingNumber: true } } } },
     },
   },
+  asset: assetVehicle,
 } satisfies Prisma.InvoiceInclude;
 
 type InvoiceWithDetail = Prisma.InvoiceGetPayload<{ include: typeof detailInclude }>;
 
 function toDetail(inv: InvoiceWithDetail) {
-  const { flat, org, tenant, ...rest } = inv;
+  const { flat, asset, org, tenant, ...rest } = inv;
   const ownerUser = org.memberships[0]?.user;
   return {
     ...rest,
     invoiceNo: invoiceNo(inv),
-    flat: { name: flat.name, flatNumber: flat.flatNumber, floorName: flat.floor.name },
-    building: flat.floor.building,
+    // vehicle invoices: the reg no stands in for the unit and there is no building
+    flat: { name: unitName({ flat, asset }), flatNumber: flat?.flatNumber ?? null, floorName: flat?.floor.name ?? null },
+    building: flat?.floor.building ?? null,
+    vehicle: asset?.vehicle ?? null,
     owner: { name: org.name, phone: ownerUser?.phone ?? null, email: ownerUser?.email ?? null },
     tenant: tenant && { name: `${tenant.firstName} ${tenant.lastName}`, phone: tenant.phone, email: tenant.email, lang: tenant.lang },
   };
@@ -166,29 +207,85 @@ export class InvoiceService {
           continue;
         }
 
-        try {
-          const inv = await prisma.$transaction(async (tx) => {
-            const inv = await tx.invoice.create({ data: { ...data, items: { createMany: { data: items } } } });
-            if (prev) await tx.invoice.update({ where: { id: prev.id }, data: { carriedForward: true } });
-            return inv;
-          });
-          created.push(inv);
-        } catch (e) {
-          // another request created it first (unique agreement + period): treat as already generated
-          if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") continue;
-          throw e;
-        }
+        const inv = await this.save(data, items, prev);
+        if (inv) created.push(inv);
       }
     }
 
     return { created, missing, total, skipped: existing.size };
   }
 
+  /** Create the invoice and mark the one it carries forward, atomically. null when another request made it first. */
+  private async save(data: Prisma.InvoiceUncheckedCreateInput, items: Prisma.InvoiceItemCreateManyInvoiceInput[], prev: Invoice | null) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const inv = await tx.invoice.create({ data: { ...data, items: { createMany: { data: items } } } });
+        if (prev) await tx.invoice.update({ where: { id: prev.id }, data: { carriedForward: true } });
+        return inv;
+      });
+    } catch (e) {
+      // unique agreement + period: treat as already generated
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") return null;
+      throw e;
+    }
+  }
+
+  /** One invoice per vehicle agreement covering the month: the Jama (DAILY) or Rent (MONTHLY) line, no utilities. */
+  private async generateVehicles(orgId: number, month: number, year: number, where: Prisma.AgreementWhereInput = {}) {
+    const period = monthPeriod(month, year);
+    const agreements = await prisma.agreement.findMany({
+      where: { orgId, ...agreementsInMonth(month, year), asset: { kind: "VEHICLE" }, ...where },
+      include: { ...agreementInclude, invoices: { where: { periodStart: period.start }, select: { id: true } } },
+    });
+    const created: Invoice[] = [];
+    let total = 0;
+    for (const a of agreements) {
+      const c = await vehicleCharge(prisma, a, month, year);
+      if (!c) continue;
+      total++;
+      if (a.invoices.length) continue;
+      const prev = await previousOpenInvoice(prisma, a.id, period.start);
+      const previousDue = prev ? num(prev.dueAmount) : 0;
+      const totalAmount = r2(c.amount + previousDue);
+      const inv = await this.save({
+        flatId: null,
+        tenantId: a.tenantId,
+        agreementId: a.id,
+        assetId: a.assetId,
+        orgId,
+        month,
+        year,
+        periodStart: period.start,
+        periodEnd: period.end,
+        rent: c.amount,
+        previousDue,
+        totalAmount,
+        dueAmount: totalAmount,
+        // jama is collected day by day; the month's balance is due at month end
+        dueDate: a.cycle === "DAILY" ? period.end : new Date(year, month - 1, a.dueDay),
+      }, [vehicleItem(a.cycle, c)], prev);
+      if (inv) created.push(inv);
+    }
+    return { created, total };
+  }
+
+  /** Invoice one asset (unit or vehicle) for a month; used by agreement create and move-out. */
+  async generateForAsset(orgId: number, assetId: bigint, month: number, year: number) {
+    const unit = await prisma.flat.findUnique({ where: { assetId }, select: { id: true } });
+    if (unit) return this.generateForFlat(orgId, unit.id, month, year);
+    const { created, total } = await this.generateVehicles(orgId, month, year, { assetId });
+    if (!total) throw new ValidationError("This vehicle has no agreement covering that month");
+    if (!created.length) throw new ConflictError(`Invoice already exists for ${month}/${year}`);
+    return this.findById(String(orgId), String(created[0].id));
+  }
+
   async generateForOrg(orgId: string | number | bigint, month: number, year: number) {
     const oid = toNumberId(orgId as any);
     const { created, missing, total } = await this.generate(oid, month, year, billableFlatWhere(oid, month, year));
-    if (created.length) await audit(prisma, "invoice.generate", "Invoice", null, { month, year, generated: created.length, total });
-    return { generated: created.length, total, missing };
+    const v = await this.generateVehicles(oid, month, year);
+    const generated = created.length + v.created.length;
+    if (generated) await audit(prisma, "invoice.generate", "Invoice", null, { month, year, generated, total: total + v.total });
+    return { generated, total: total + v.total, missing };
   }
 
   async generateForFlat(orgId: string | number | bigint, flatId: string | number | bigint, month: number, year: number, dryRun = false) {
@@ -222,6 +319,7 @@ export class InvoiceService {
     if (query.search) {
       where.OR = [
         { flat: { name: { contains: query.search } } },
+        { asset: { vehicle: { regNo: { contains: query.search } } } },
         { tenant: { firstName: { contains: query.search } } },
         { tenant: { lastName: { contains: query.search } } },
       ];
@@ -235,6 +333,7 @@ export class InvoiceService {
         orderBy: [{ year: "desc" }, { month: "desc" }, { id: "desc" }],
         include: {
           flat: { select: { name: true, floor: { select: { building: { select: { name: true } } } } } },
+          asset: assetVehicle,
           tenant: { select: { firstName: true, lastName: true, phone: true } },
         },
       }),
@@ -242,11 +341,11 @@ export class InvoiceService {
     ]);
 
     return {
-      data: data.map(({ flat, tenant, ...inv }) => ({
+      data: data.map(({ flat, asset, tenant, ...inv }) => ({
         ...inv,
         invoiceNo: invoiceNo(inv),
-        flatName: flat.name,
-        buildingName: flat.floor.building.name,
+        flatName: unitName({ flat, asset }),
+        buildingName: flat?.floor.building.name ?? "",
         tenantName: tenant ? `${tenant.firstName} ${tenant.lastName}` : null,
         tenantPhone: tenant?.phone ?? null,
       })),

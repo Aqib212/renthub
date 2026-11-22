@@ -50,8 +50,10 @@ export interface InvoicePayment {
 export interface InvoiceDetail extends Omit<Invoice, "flatName" | "tenantName"> {
   items: InvoiceItem[];
   payments: InvoicePayment[];
-  flat: { name: string; flatNumber: string | null; floorName: string };
-  building: { name: string; address: string | null; area: string | null; district: string | null; holdingNumber: string | null };
+  /** for a vehicle invoice: name = the reg no label, no floor and no building */
+  flat: { name: string; flatNumber: string | null; floorName: string | null };
+  building: { name: string; address: string | null; area: string | null; district: string | null; holdingNumber: string | null } | null;
+  vehicle?: { regNo: string; type: string } | null;
   owner: { name: string; phone: string | null; email: string | null };
   tenant: { name: string; phone: string | null; email: string | null } | null;
 }
