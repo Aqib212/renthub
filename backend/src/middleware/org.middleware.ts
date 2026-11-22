@@ -33,7 +33,9 @@ export const requireOrg = async (req: OrgRequest, _res: Response, next: NextFunc
       role: m.role,
       buildingIds: Array.isArray(m.buildingIds) ? (m.buildingIds as unknown[]).map(Number) : null,
     };
-    actorStore.run({ orgId: req.org.id, userId: Number(userId), membershipId: req.org.membershipId, ip: req.ip, userAgent: req.get("user-agent") }, next);
+    // the owner always sees everything; other members may be limited to some buildings (shared/scope.ts)
+    const buildingIds = m.role === "OWNER" ? null : req.org.buildingIds;
+    actorStore.run({ orgId: req.org.id, userId: Number(userId), membershipId: req.org.membershipId, buildingIds, ip: req.ip, userAgent: req.get("user-agent") }, next);
   } catch (e) {
     next(e);
   }

@@ -27,6 +27,16 @@ export const env = {
   /** Public base URL of the frontend, used in SMS links (receipts, invoices). */
   appUrl: (process.env.APP_URL || "http://localhost:3000").replace(/\/$/, ""),
 
+  /** Where the payment gateway sends the browser and its IPN back to; the frontend proxies /api, so APP_URL works locally. */
+  apiPublicUrl: (process.env.API_PUBLIC_URL || process.env.APP_URL || "http://localhost:3000").replace(/\/$/, ""),
+
+  gateway: {
+    /** encrypts each workspace's SSLCommerz store password at rest (any long random string) */
+    key: process.env.GATEWAY_KEY || "",
+    /** test mode only: skip SSLCommerz and accept val_id "FAKE-<tranId>" */
+    fake: process.env.SSLCZ_FAKE === "1" && process.env.NODE_ENV !== "production",
+  },
+
   sms: {
     /** "console" prints messages (default); "http" calls a gateway with the template URL below. */
     driver: (process.env.SMS_DRIVER || "console") as "console" | "http",

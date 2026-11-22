@@ -3,6 +3,15 @@ import { AuthService } from "./auth.service";
 import { asyncHandler } from "../../shared/utils/asyncHandler";
 import { sendSuccess } from "../../shared/utils/apiResponse";
 import type { AuthRequest } from "../../middleware/auth.middleware";
+import { env } from "../../config/env";
+import { STAFF_RT, clearRefreshCookie, durationMs, readCookie, setRefreshCookie } from "../../shared/utils/cookies";
+import { UnauthorizedError } from "../../shared/utils/errors";
+
+/** Puts the refresh token in the httpOnly cookie and leaves only the access token in the body. */
+const withCookie = <T extends { tokens: { accessToken: string; refreshToken: string } }>(res: Response, r: T) => {
+  setRefreshCookie(res, STAFF_RT, r.tokens.refreshToken, durationMs(env.jwt.refreshExpiresIn));
+  return { ...r, tokens: { accessToken: r.tokens.accessToken } };
+};
 
 const authService = new AuthService();
 
@@ -11,7 +20,7 @@ export const register = asyncHandler(async (req, res: Response) => {
   sendSuccess(res, {
     statusCode: 201,
     message: "Registration successful. Please verify your email with the OTP sent.",
-    data: result,
+    data: withCookie(res, result),
   });
 });
 
@@ -20,21 +29,31 @@ export const login = asyncHandler(async (req, res: Response) => {
   sendSuccess(res, {
     statusCode: 200,
     message: "Login successful",
-    data: result,
+    data: withCookie(res, result),
   });
 });
 
 export const refreshToken = asyncHandler(async (req, res: Response) => {
-  const result = await authService.refreshToken(req.body.refreshToken);
+  const token = readCookie(req, STAFF_RT.name);
+  if (!token) throw new UnauthorizedError("Not logged in");
+  let result;
+  try {
+    result = await authService.refreshToken(token);
+  } catch (e) {
+    clearRefreshCookie(res, STAFF_RT);
+    throw e;
+  }
   sendSuccess(res, {
     statusCode: 200,
     message: "Token refreshed successfully",
-    data: result,
+    data: withCookie(res, { tokens: result }).tokens,
   });
 });
 
 export const logout = asyncHandler(async (req: AuthRequest, res: Response) => {
-  await authService.logout(req.user!.userId);
+  const token = readCookie(req, STAFF_RT.name);
+  if (token) await authService.logoutByRefreshToken(token);
+  clearRefreshCookie(res, STAFF_RT);
   sendSuccess(res, {
     statusCode: 200,
     message: "Logout successful",
@@ -43,6 +62,7 @@ export const logout = asyncHandler(async (req: AuthRequest, res: Response) => {
 
 export const changePassword = asyncHandler(async (req: AuthRequest, res: Response) => {
   await authService.changePassword(req.user!.userId, req.body);
+  clearRefreshCookie(res, STAFF_RT);
   sendSuccess(res, {
     statusCode: 200,
     message: "Password changed successfully. Please login again.",

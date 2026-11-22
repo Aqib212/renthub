@@ -26,7 +26,8 @@ export async function membershipsOf(userId: bigint | number) {
     include: { org: { select: { name: true } } },
     orderBy: { createdAt: "asc" },
   });
-  return rows.map((m) => ({ orgId: String(m.orgId), orgName: m.org.name, role: m.role }));
+  // limited = the member sees only some buildings (no fleet screens); the owner never is
+  return rows.map((m) => ({ orgId: String(m.orgId), orgName: m.org.name, role: m.role, limited: m.role !== "OWNER" && Array.isArray(m.buildingIds) && m.buildingIds.length > 0 }));
 }
 
 export class AuthService {
@@ -195,6 +196,16 @@ export class AuthService {
     });
 
     return tokens;
+  }
+
+  /** Revoke the session behind a refresh cookie (an invalid or stale token is simply ignored). */
+  async logoutByRefreshToken(refreshToken: string): Promise<void> {
+    try {
+      const { userId } = verifyRefreshToken(refreshToken);
+      await prisma.user.updateMany({ where: { id: toNumberId(userId), refreshToken }, data: { refreshToken: null } });
+    } catch {
+      // expired or forged: nothing to revoke
+    }
   }
 
   async logout(userId: string): Promise<void> {

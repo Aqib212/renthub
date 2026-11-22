@@ -137,8 +137,11 @@ const SidebarContent = ({ onNavigate }: { onNavigate?: () => void }) => {
   const { t } = useT();
   const location = useLocation();
   const navigate = useNavigate();
-  const role = useCurrentMembership()?.role;
+  const membership = useCurrentMembership();
+  const role = membership?.role;
   const visible = groups
+    // staff limited to some buildings see no vehicles (the API hides them too)
+    .filter((g) => !(membership?.limited && g.label === "nav.fleet"))
     .map((g) => ({ ...g, items: g.items.filter((i) => !i.roles || (role && i.roles.includes(role))) }))
     .filter((g) => g.items.length);
 

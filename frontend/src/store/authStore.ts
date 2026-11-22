@@ -4,14 +4,14 @@ import type { User, AuthTokens, Membership } from "@/types";
 
 interface AuthState {
   user: User | null;
+  /** in memory only: after a reload the first request refreshes it from the httpOnly cookie */
   accessToken: string | null;
-  refreshToken: string | null;
   isAuthenticated: boolean;
   /** Workspace sent as X-Org-Id on every request. */
   currentOrgId: string | null;
   setCurrentOrg: (orgId: string) => void;
   setAuth: (user: User, tokens: AuthTokens) => void;
-  setTokens: (accessToken: string, refreshToken: string) => void;
+  setAccessToken: (accessToken: string) => void;
   setUser: (user: User) => void;
   logout: () => void;
 }
@@ -29,7 +29,6 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       user: null,
       accessToken: null,
-      refreshToken: null,
       isAuthenticated: false,
       currentOrgId: null,
 
@@ -39,13 +38,11 @@ export const useAuthStore = create<AuthState>()(
         set((s) => ({
           user,
           accessToken: tokens.accessToken,
-          refreshToken: tokens.refreshToken,
           isAuthenticated: true,
           currentOrgId: pickOrg(user.memberships, s.currentOrgId),
         })),
 
-      setTokens: (accessToken, refreshToken) =>
-        set({ accessToken, refreshToken }),
+      setAccessToken: (accessToken) => set({ accessToken }),
 
       setUser: (user) => set((s) => ({ user, currentOrgId: pickOrg(user.memberships, s.currentOrgId) })),
 
@@ -53,7 +50,6 @@ export const useAuthStore = create<AuthState>()(
         set({
           user: null,
           accessToken: null,
-          refreshToken: null,
           isAuthenticated: false,
           currentOrgId: null,
         }),
@@ -62,8 +58,6 @@ export const useAuthStore = create<AuthState>()(
       name: "renthub-auth",
       partialize: (state) => ({
         user: state.user,
-        accessToken: state.accessToken,
-        refreshToken: state.refreshToken,
         isAuthenticated: state.isAuthenticated,
         currentOrgId: state.currentOrgId,
       }),

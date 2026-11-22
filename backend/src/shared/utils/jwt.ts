@@ -1,4 +1,5 @@
 import jwt from "jsonwebtoken";
+import { randomUUID } from "node:crypto";
 import { env } from "../../config/env";
 
 interface TokenPayload {
@@ -14,8 +15,10 @@ export const generateAccessToken = (payload: TokenPayload): string => {
 };
 
 export const generateRefreshToken = (payload: TokenPayload): string => {
+  // a random jwtid makes every refresh token unique, so rotation really retires the old one (even within the same second)
   return jwt.sign(payload, env.jwt.refreshSecret, {
     expiresIn: env.jwt.refreshExpiresIn as any,
+    jwtid: randomUUID(),
   });
 };
 

@@ -466,6 +466,10 @@ export const en = {
   "book.vehicleBookings": "Bookings",
   "book.book": "Book",
   "book.noBookings": "No bookings.",
+  "pay.button": "Pay {amount} online",
+  "pay.hint": "bKash, Nagad, Rocket or card, through SSLCommerz. The receipt comes by SMS.",
+  "pay.failed": "The payment did not go through. No money was taken; you can try again.",
+  "pay.cancelled": "You cancelled the payment.",
 } as const;
 
 export type MessageKey = keyof typeof en;

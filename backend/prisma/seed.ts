@@ -133,6 +133,10 @@ async function main() {
     },
   });
 
+  // phase 8: a manager who looks after one building only
+  const blockManager = await staff("block@demo.com", "Nasir", "Uddin");
+  await prisma.membership.create({ data: { userId: blockManager.id, orgId: org.id, role: "MANAGER", buildingIds: [Number(building1.id)] } });
+
   // ==============================
   // 3. FLOORS
   // ==============================
@@ -539,7 +543,7 @@ async function main() {
   console.log(`   Expenses: ${expenseData.length}`);
   console.log(`   Demo owner login: owner@demo.com / Test1234`);
   console.log(`   Demo owner2 login: owner2@demo.com / Test1234`);
-  console.log(`   Staff in org 1: manager@demo.com, caretaker@demo.com / Test1234`);
+  console.log(`   Staff in org 1: manager@demo.com, caretaker@demo.com, block@demo.com (one building) / Test1234`);
 
   console.log("\n📌 Summary for Dashboard:");
   console.log("   Total Buildings: 2");

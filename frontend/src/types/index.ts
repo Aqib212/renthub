@@ -21,6 +21,8 @@ export interface Membership {
   orgId: string;
   orgName: string;
   role: OrgRole;
+  /** sees only some buildings (and no vehicles) */
+  limited?: boolean;
 }
 
 export interface OwnerProfile {
@@ -36,9 +38,9 @@ export interface OwnerProfile {
   photo: string | null;
 }
 
+/** The refresh token is an httpOnly cookie the browser keeps; only the access token reaches JS. */
 export interface AuthTokens {
   accessToken: string;
-  refreshToken: string;
 }
 
 export interface AuthResponse {

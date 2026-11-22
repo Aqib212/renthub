@@ -2,6 +2,7 @@ import { prisma } from "../../shared/prisma";
 import { toNumberId } from "../../shared/utils/helpers";
 import { invoiceNo } from "../invoice/invoice.service";
 import { assetVehicle, unitName, unitPlace } from "../../shared/utils/asset";
+import { rawInvoiceScope } from "../../shared/scope";
 
 function toNumber(val: unknown): number {
   if (val === null || val === undefined) return 0;
@@ -71,7 +72,7 @@ export class DashboardService {
     const monthlyIncomeRows = await prisma.$queryRawUnsafe<any[]>(
       `SELECT MONTH(p.date) as mn, SUM(p.amount) as tot
        FROM payments p
-       WHERE p.orgId = ? AND p.date >= DATE_SUB(CURRENT_DATE, INTERVAL 6 MONTH)
+       WHERE p.orgId = ? AND p.date >= DATE_SUB(CURRENT_DATE, INTERVAL 6 MONTH)${rawInvoiceScope() ? ` AND p.invoiceId IN (SELECT i.id FROM invoices i WHERE 1 = 1${rawInvoiceScope()})` : ""}
        GROUP BY MONTH(p.date) ORDER BY mn ASC`,
       toNumberId(orgId)
     );
@@ -80,7 +81,7 @@ export class DashboardService {
     const collectionRows = await prisma.$queryRawUnsafe<any[]>(
       `SELECT i.month as mn, SUM(i.paidAmount) as col, SUM(i.dueAmount) as due
        FROM invoices i
-       WHERE i.orgId = ? AND i.year = ?
+       WHERE i.orgId = ? AND i.year = ?${rawInvoiceScope()}
        GROUP BY i.month ORDER BY i.month ASC`,
       toNumberId(orgId),
       currentYear
@@ -92,7 +93,7 @@ export class DashboardService {
        FROM invoices i
        LEFT JOIN flats f ON f.id = i.flatId
        LEFT JOIN vehicles v ON v.assetId = i.assetId
-       WHERE i.orgId = ? AND i.status != 'PAID' AND i.carriedForward = false
+       WHERE i.orgId = ? AND i.status != 'PAID' AND i.carriedForward = false${rawInvoiceScope()}
        GROUP BY fn ORDER BY due DESC`,
       toNumberId(orgId)
     );
@@ -125,7 +126,7 @@ export class DashboardService {
       `SELECT it.label as label, SUM(it.amount) as amt
        FROM invoice_items it
        JOIN invoices i ON i.id = it.invoiceId
-       WHERE i.orgId = ? AND i.month = ? AND i.year = ?
+       WHERE i.orgId = ? AND i.month = ? AND i.year = ?${rawInvoiceScope()}
        GROUP BY it.label ORDER BY amt DESC`,
       toNumberId(orgId),
       currentMonth,

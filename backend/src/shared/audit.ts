@@ -1,11 +1,8 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "./prisma";
+import { actorStore } from "./actor";
 
-/** Who is acting in this request; set by requireOrg so services can audit without a req parameter. */
-/** A staff member (userId + membershipId) or a tenant in the portal (tenantId). */
-export interface Actor { orgId: number; userId?: number; membershipId?: number; tenantId?: number; ip?: string; userAgent?: string }
-export const actorStore = new AsyncLocalStorage<Actor>();
+export { actorStore, type Actor } from "./actor";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 

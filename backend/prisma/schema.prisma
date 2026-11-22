@@ -139,6 +139,15 @@ enum PaymentMethod {
   DEPOSIT
   /// tax a company tenant withheld and paid to the government (challan no. in transactionId)
   TDS
+  /// paid by the tenant through the online gateway (SSLCommerz); never recorded by hand
+  ONLINE
+}
+
+enum OnlinePayStatus {
+  INITIATED
+  PAID
+  FAILED
+  CANCELLED
 }
 
 enum ExpenseCategory {
@@ -244,29 +253,32 @@ model Organization {
   plan      String   @default("FREE") @db.VarChar(30)
   unitLimit Int?
   settings  Json?
+  /// SSLCommerz store { storeId, storePassEnc, sandbox }; kept out of settings so it is never sent to the browser
+  gateway   Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships   Membership[]
-  buildings     Building[]
-  tenants       Tenant[]
-  billTypes     BillType[]
-  invoices      Invoice[]
-  payments      Payment[]
-  expenses      Expense[]
-  assets        Asset[]
-  agreements    Agreement[]
-  counters      OrgCounter[]
-  notifications Notification[]
-  handovers     CashHandover[]
-  buildingBills BuildingBill[]
-  maintenance   MaintenanceRequest[]
-  documents     Document[]
-  auditLogs     AuditLog[]
-  claims        PaymentClaim[]
-  notices       NoticeRequest[]
-  vehicles      Vehicle[]
-  bookings      Booking[]
+  memberships    Membership[]
+  buildings      Building[]
+  tenants        Tenant[]
+  billTypes      BillType[]
+  invoices       Invoice[]
+  payments       Payment[]
+  expenses       Expense[]
+  assets         Asset[]
+  agreements     Agreement[]
+  counters       OrgCounter[]
+  notifications  Notification[]
+  handovers      CashHandover[]
+  buildingBills  BuildingBill[]
+  maintenance    MaintenanceRequest[]
+  documents      Document[]
+  auditLogs      AuditLog[]
+  claims         PaymentClaim[]
+  notices        NoticeRequest[]
+  vehicles       Vehicle[]
+  onlinePayments OnlinePayment[]
+  bookings       Booking[]
 
   @@map("organizations")
 }
@@ -556,11 +568,12 @@ model Invoice {
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  payments      Payment[]
-  items         InvoiceItem[]
-  notifications Notification[]
-  claims        PaymentClaim[]
-  booking       Booking?
+  payments       Payment[]
+  items          InvoiceItem[]
+  notifications  Notification[]
+  claims         PaymentClaim[]
+  booking        Booking?
+  onlinePayments OnlinePayment[]
 
   @@unique([agreementId, periodStart])
   @@index([flatId, month, year])
@@ -612,6 +625,7 @@ model Payment {
   handover      CashHandover?  @relation(fields: [handoverId], references: [id], onDelete: SetNull)
   notifications Notification[]
   claim         PaymentClaim?
+  online        OnlinePayment?
 
   @@unique([orgId, receiptNo])
   @@index([invoiceId])
@@ -1050,4 +1064,28 @@ model NoticeRequest {
   @@index([orgId, status])
   @@index([agreementId, status])
   @@map("notice_requests")
+}
+
+/// One checkout attempt through the gateway. PAID links the Payment it created (once: paymentId is unique).
+model OnlinePayment {
+  id         BigInt          @id @default(autoincrement())
+  orgId      BigInt
+  org        Organization    @relation(fields: [orgId], references: [id])
+  invoiceId  BigInt
+  invoice    Invoice         @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  /// our transaction id, sent to the gateway
+  tranId     String          @unique @db.VarChar(40)
+  amount     Decimal         @db.Decimal(12, 2)
+  status     OnlinePayStatus @default(INITIATED)
+  valId      String?         @db.VarChar(100)
+  cardType   String?         @db.VarChar(50)
+  bankTranId String?         @db.VarChar(100)
+  paymentId  BigInt?         @unique
+  payment    Payment?        @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  raw        Json?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@index([invoiceId])
+  @@map("online_payments")
 }

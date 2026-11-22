@@ -462,4 +462,8 @@ export const bn: Partial<Record<MessageKey, string>> = {
   "book.vehicleBookings": "বুকিং",
   "book.book": "বুক করুন",
   "book.noBookings": "কোনো বুকিং নেই।",
+  "pay.button": "অনলাইনে {amount} পরিশোধ করুন",
+  "pay.hint": "বিকাশ, নগদ, রকেট বা কার্ডে (SSLCommerz)। রসিদ SMS-এ আসবে।",
+  "pay.failed": "পরিশোধ সম্পন্ন হয়নি। টাকা কাটা হয়নি; আবার চেষ্টা করুন।",
+  "pay.cancelled": "আপনি পরিশোধ বাতিল করেছেন।",
 };

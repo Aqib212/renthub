@@ -9,6 +9,7 @@ import toast from "react-hot-toast";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { orgApi, type Member, type StaffRole } from "@/api/org";
 import { apiError } from "@/utils/format";
+import { buildingApi } from "@/api/building";
 
 const ROLE_LABEL: Record<string, string> = { OWNER: "Owner", MANAGER: "Manager", ACCOUNTANT: "Accountant", CARETAKER: "Caretaker" };
 const ROLE_HINT: Record<StaffRole, string> = {
@@ -26,17 +27,42 @@ const ACTION_LABEL: Record<string, string> = {
   "settings:write": "Change settings",
 };
 
-const emptyInvite = { firstName: "", lastName: "", email: "", phone: "", role: "CARETAKER" as StaffRole };
+const emptyInvite = { firstName: "", lastName: "", email: "", phone: "", role: "CARETAKER" as StaffRole, buildingIds: [] as number[] };
+
+/** "All buildings" (empty) or some of them. A limited member sees only those buildings, and no vehicles. */
+const BuildingsPicker = ({ value, onChange, buildings, size, label }: {
+  value: number[]; onChange: (ids: number[]) => void; buildings: { id: number; name: string }[]; size?: "small"; label?: string;
+}) => (
+  <TextField
+    select size={size} label={label} value={value}
+    SelectProps={{
+      multiple: true, displayEmpty: true,
+      renderValue: (v) => ((v as number[]).length ? buildings.filter((b) => (v as number[]).includes(b.id)).map((b) => b.name).join(", ") : "All buildings"),
+    }}
+    InputLabelProps={label ? { shrink: true } : undefined}
+    onChange={(e) => onChange((e.target.value as unknown as number[]).map(Number))}
+    helperText={label ? (value.length ? "Sees only these buildings (no vehicles)" : "Sees every building and vehicle") : undefined}
+  >
+    {buildings.map((b) => <MenuItem key={b.id} value={b.id}>{b.name}</MenuItem>)}
+  </TextField>
+);
 
 export const StaffPage = () => {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ["org-members"], queryFn: orgApi.members });
+  const { data: buildings = [] } = useQuery({
+    queryKey: ["buildings", { limit: 200 }],
+    queryFn: async () => {
+      const res = await buildingApi.getAll({ limit: 200 });
+      return (res.data.data || res.data) as { id: number; name: string }[];
+    },
+  });
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(emptyInvite);
   const refresh = () => qc.invalidateQueries({ queryKey: ["org-members"] });
 
   const invite = useMutation({
-    mutationFn: () => orgApi.invite({ ...form, phone: form.phone || undefined }),
+    mutationFn: () => orgApi.invite({ ...form, phone: form.phone || undefined, buildingIds: form.buildingIds.length ? form.buildingIds : null }),
     onSuccess: () => {
       toast.success("Member added. A new account's temporary password is printed in the server console.");
       setOpen(false);
@@ -46,7 +72,7 @@ export const StaffPage = () => {
     onError: (e) => toast.error(apiError(e)),
   });
   const update = useMutation({
-    mutationFn: ({ id, body }: { id: number; body: { role?: StaffRole; isActive?: boolean } }) => orgApi.updateMember(id, body),
+    mutationFn: ({ id, body }: { id: number; body: { role?: StaffRole; isActive?: boolean; buildingIds?: number[] | null } }) => orgApi.updateMember(id, body),
     onSuccess: refresh,
     onError: (e) => toast.error(apiError(e)),
   });
@@ -72,10 +98,10 @@ export const StaffPage = () => {
           <TableContainer>
             <Table>
               <TableHead>
-                <TableRow><TableCell>Person</TableCell><TableCell>Role</TableCell><TableCell>Active</TableCell><TableCell align="right" /></TableRow>
+                <TableRow><TableCell>Person</TableCell><TableCell>Role</TableCell><TableCell>Buildings</TableCell><TableCell>Active</TableCell><TableCell align="right" /></TableRow>
               </TableHead>
               <TableBody>
-                {isLoading && <TableRow><TableCell colSpan={4}>Loading…</TableCell></TableRow>}
+                {isLoading && <TableRow><TableCell colSpan={5}>Loading…</TableCell></TableRow>}
                 {data?.members.map((m) => {
                   const owner = m.role === "OWNER";
                   return (
@@ -94,6 +120,12 @@ export const StaffPage = () => {
                           >
                             {(Object.keys(ROLE_HINT) as StaffRole[]).map((r) => <MenuItem key={r} value={r}>{ROLE_LABEL[r]}</MenuItem>)}
                           </TextField>
+                        )}
+                      </TableCell>
+                      <TableCell sx={{ minWidth: 170, maxWidth: 260 }}>
+                        {owner ? <Typography variant="body2" color="text.secondary">All</Typography> : (
+                          <BuildingsPicker size="small" buildings={buildings} value={m.buildingIds ?? []}
+                            onChange={(ids) => update.mutate({ id: m.id, body: { buildingIds: ids.length ? ids : null } })} />
                         )}
                       </TableCell>
                       <TableCell>
@@ -161,6 +193,11 @@ export const StaffPage = () => {
           <TextField select label="Role" value={form.role} onChange={set("role")} helperText={ROLE_HINT[form.role]} sx={{ gridColumn: { sm: "1 / -1" } }}>
             {(Object.keys(ROLE_HINT) as StaffRole[]).map((r) => <MenuItem key={r} value={r}>{ROLE_LABEL[r]}</MenuItem>)}
           </TextField>
+          {buildings.length > 1 && (
+            <Box sx={{ gridColumn: { sm: "1 / -1" }, display: "grid" }}>
+              <BuildingsPicker label="Buildings" buildings={buildings} value={form.buildingIds} onChange={(ids) => setForm({ ...form, buildingIds: ids })} />
+            </Box>
+          )}
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setOpen(false)}>Cancel</Button>

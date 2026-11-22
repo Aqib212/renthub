@@ -29,8 +29,14 @@ export const invoiceApi = {
   },
 
   /** No auth header: used by the tenant's public link. */
-  getShared: async (token: string): Promise<InvoiceDetail> => {
+  getShared: async (token: string): Promise<InvoiceDetail & { canPayOnline?: boolean }> => {
     const { data } = await axios.get(`/api/v1/public/invoices/${encodeURIComponent(token)}`);
+    return data.data;
+  },
+
+  /** Starts an SSLCommerz checkout for the shared invoice; returns the gateway page to open. */
+  payOnline: async (token: string): Promise<{ url: string }> => {
+    const { data } = await axios.post(`/api/v1/public/pay/${encodeURIComponent(token)}`);
     return data.data;
   },
 

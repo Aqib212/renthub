@@ -1,6 +1,6 @@
 import cron from "node-cron";
 import { prisma } from "./shared/prisma";
-import { InvoiceService } from "./modules/invoice/invoice.service";
+import { InvoiceService, applyLateFees } from "./modules/invoice/invoice.service";
 import { drain, queueDailyReminders, queueExpiryReminders } from "./modules/notification/notification.service";
 import { todayBd } from "./modules/vehicle/vehicle.service";
 
@@ -38,6 +38,16 @@ export function startScheduledTasks() {
 
   // outbox: send queued SMS every minute
   let draining = false;
+  // 00:45: late fees, after the 00:30 OVERDUE marking
+  cron.schedule("45 0 * * *", async () => {
+    try {
+      const { charged } = await applyLateFees();
+      if (charged) console.log(`[Cron] Added late fees to ${charged} invoices`);
+    } catch (error) {
+      console.error("[Cron] Late fees failed:", error);
+    }
+  });
+
   cron.schedule("* * * * *", async () => {
     if (draining) return; // a slow gateway must not start a second drain
     draining = true;

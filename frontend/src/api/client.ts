@@ -17,36 +17,44 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+/**
+ * One refresh at a time: the refresh token rotates, so parallel 401s (e.g. every query after a reload,
+ * when the access token is only in memory) must share one call or the second would log the user out.
+ */
+let refreshing: Promise<string | null> | null = null;
+const NO_REFRESH = ["/auth/login", "/auth/register", "/auth/refresh-token", "/auth/logout", "/auth/forgot-password", "/auth/reset-password", "/auth/verify-email", "/auth/resend-otp"];
+const refresh = () =>
+  (refreshing ??= (async () => {
+    if (!useAuthStore.getState().isAuthenticated) return null;
+    try {
+      // the httpOnly refresh cookie goes along by itself
+      const r = await axios.post("/api/v1/auth/refresh-token");
+      const accessToken = r.data.data.accessToken as string;
+      useAuthStore.getState().setAccessToken(accessToken);
+      return accessToken;
+    } catch {
+      return null;
+    } finally {
+      refreshing = null;
+    }
+  })());
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // a 401 from these means wrong credentials or no session, not an expired access token
+    const isAuthCall = NO_REFRESH.includes(String(originalRequest?.url ?? ""));
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry && !isAuthCall) {
       originalRequest._retry = true;
-
-      const refreshToken = useAuthStore.getState().refreshToken;
-      if (refreshToken) {
-        try {
-          const response = await axios.post("/api/v1/auth/refresh-token", {
-            refreshToken,
-          });
-
-          const { accessToken, refreshToken: newRefreshToken } = response.data.data;
-          useAuthStore.getState().setTokens(accessToken, newRefreshToken);
-
-          originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-          return api(originalRequest);
-        } catch {
-          useAuthStore.getState().logout();
-          window.location.href = "/login";
-        }
-      } else {
-        useAuthStore.getState().logout();
-        window.location.href = "/login";
+      const accessToken = await refresh();
+      if (accessToken) {
+        originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+        return api(originalRequest);
       }
+      useAuthStore.getState().logout();
+      window.location.href = "/login";
     }
-
     return Promise.reject(error);
   }
 );
@@ -56,7 +64,6 @@ export default api;
 export const authApi = {
   register: (data: any) => api.post("/auth/register", data),
   login: (data: any) => api.post("/auth/login", data),
-  refreshToken: (refreshToken: string) => api.post("/auth/refresh-token", { refreshToken }),
   logout: () => api.post("/auth/logout"),
   changePassword: (data: any) => api.post("/auth/change-password", data),
   forgotPassword: (email: string) => api.post("/auth/forgot-password", { email }),

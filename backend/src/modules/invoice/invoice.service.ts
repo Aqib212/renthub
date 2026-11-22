@@ -8,6 +8,8 @@ import { loadBillingContext, billableFlatWhere, agreementsInMonth, agreementIncl
 import type { UpdateInvoiceInput } from "./invoice.validation";
 import { monthPeriod } from "../../shared/utils/rental";
 import { assetVehicle, unitName } from "../../shared/utils/asset";
+import { lateFeeFor } from "../../shared/utils/lateFee";
+import { settingsOf } from "../org/org.service";
 
 type Tx = Prisma.TransactionClient;
 type InvoiceStatus = "PENDING" | "PAID" | "PARTIALLY_PAID" | "OVERDUE";
@@ -88,6 +90,39 @@ export async function rebuildVehicleInvoice(tx: Tx, invoiceId: bigint) {
     data: { rent: amount, totalAmount: Math.max(0, r2(others + amount + num(inv.previousDue) - num(inv.discount) + num(inv.fine))) },
   });
   await recalculateInvoice(inv.id, tx);
+}
+
+/**
+ * Nightly: add each org's late fee (Settings) once to monthly rent invoices that are past due + grace days.
+ * The fee is the invoice's `fine`; an invoice that already has a fine (charged, or set by hand) is left alone.
+ * ponytail: a fee waived by setting fine to 0 is charged again the next night; add a waived flag if owners hit it.
+ */
+export async function applyLateFees(today = new Date()) {
+  const orgs = await prisma.organization.findMany({ select: { id: true, settings: true } });
+  let charged = 0;
+  for (const org of orgs) {
+    const s = settingsOf(org.settings).lateFee;
+    if (!s.enabled || s.amount <= 0) continue;
+    const invoices = await prisma.invoice.findMany({
+      where: {
+        orgId: org.id, carriedForward: false, fine: 0, dueAmount: { gt: 0 },
+        dueDate: { lte: new Date(today.getTime() - s.afterDays * 86_400_000) },
+        agreement: { cycle: "MONTHLY" },
+      },
+      select: { id: true, dueDate: true, dueAmount: true, fine: true, rent: true, carriedForward: true, agreement: { select: { cycle: true } } },
+    });
+    for (const inv of invoices) {
+      const fee = lateFeeFor({ ...inv, dueAmount: num(inv.dueAmount), fine: num(inv.fine), rent: num(inv.rent), cycle: inv.agreement?.cycle ?? null }, s, today);
+      if (!fee) continue;
+      await prisma.$transaction(async (tx) => {
+        // fine: 0 again here, so a concurrent run cannot charge twice
+        const { count } = await tx.invoice.updateMany({ where: { id: inv.id, fine: 0 }, data: { fine: fee, totalAmount: { increment: fee } } });
+        if (count) await recalculateInvoice(inv.id, tx);
+        charged += count;
+      });
+    }
+  }
+  return { charged };
 }
 
 const detailInclude = {
@@ -370,7 +405,9 @@ export class InvoiceService {
     const inv = await prisma.invoice.findUnique({ where: { shareToken: token }, include: detailInclude });
     if (!inv) throw new NotFoundError("Invoice not found");
     const { shareToken, orgId, tenantId, flatId, ...detail } = toDetail(inv);
-    return { ...detail, owner: { ...detail.owner, email: null } };
+    const org = await prisma.organization.findUnique({ where: { id: inv.orgId }, select: { gateway: true } });
+    const canPayOnline = !!(org?.gateway as { storeId?: string } | null)?.storeId && !inv.carriedForward && num(inv.dueAmount) >= 10;
+    return { ...detail, owner: { ...detail.owner, email: null }, canPayOnline };
   }
 
   async share(orgId: string, id: string) {
