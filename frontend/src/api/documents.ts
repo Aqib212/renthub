@@ -11,7 +11,7 @@ export interface VaultDocument {
   createdAt: string;
   uploadedBy: { user: { firstName: string; lastName: string } } | null;
 }
-export type DocumentLink = { tenantId?: number; assetId?: number; agreementId?: number };
+export type DocumentLink = { tenantId?: number; assetId?: number; agreementId?: number; bookingId?: number };
 
 export const DOCUMENT_KINDS: Record<DocumentKind, string> = {
   NID: "NID / passport",

@@ -11,6 +11,7 @@ async function main() {
 
   // Clean existing data in dependency order
   await prisma.dayEntry.deleteMany();
+  await prisma.booking.deleteMany();
   await prisma.portalSession.deleteMany();
   await prisma.portalOtp.deleteMany();
   await prisma.paymentClaim.deleteMany();
@@ -516,6 +517,7 @@ async function main() {
   });
 
   await seedVehicles(org.id);
+  await seedBookings(org.id);
 
   // ==============================
   // 8. ELECTRICITY METER READINGS
@@ -657,4 +659,43 @@ async function seedVehicles(orgId: bigint) {
   await doc("ROUTE_PERMIT", "Route permit", { assetId: v2.assetId }, plus(30));
   await doc("FITNESS", "Fitness certificate", { assetId: v3.assetId }, plus(120));
   await doc("LICENCE", "Driving licence", { tenantId: d1.id }, plus(200));
+}
+
+/** Phase 7: a rent-a-car sedan with a finished trip, one ahead with an advance, and a cancelled one. */
+async function seedBookings(orgId: bigint) {
+  const { BookingService } = await import("../src/modules/booking/booking.service");
+  const bookings = new BookingService();
+  const owner = await prisma.membership.findFirstOrThrow({ where: { orgId, role: "OWNER" } });
+  const oid = Number(orgId);
+
+  const asset = await prisma.asset.create({ data: { orgId, kind: "VEHICLE" } });
+  const car = await prisma.vehicle.create({ data: { orgId, assetId: asset.id, type: "CAR", regNo: "DHAKA METRO-GA 31-9090", model: "Toyota Premio", year: 2018, color: "Silver", rate: 4500 } });
+  const company = await prisma.tenant.create({
+    data: { orgId, kind: "COMPANY", firstName: "Meghna Textiles Ltd", lastName: "", phone: "01944444444", phoneNormalized: normalizeBdPhone("01944444444"), lang: "EN" },
+  });
+  const person = await prisma.tenant.create({ data: { orgId, firstName: "Nusrat", lastName: "Jahan", phone: "01955555555", phoneNormalized: normalizeBdPhone("01955555555") } });
+
+  // Bangladesh clock time `h` on the day `n` days from today
+  const at = (n: number, h: number) => {
+    const bd = new Date(Date.now() + 6 * 3_600_000);
+    return new Date(Date.UTC(bd.getUTCFullYear(), bd.getUTCMonth(), bd.getUTCDate() + n, h) - 6 * 3_600_000);
+  };
+  const terms = { vehicleId: Number(car.id), dayRate: 4500, hourCap: 10, kmCap: 200, overtimeRate: 300, extraKmRate: 25, fuelPerKm: 0, driverName: "Kamal Hossain", driverPhone: "01966666666" };
+
+  // last week: Dhaka to Cox's Bazar and back, two days, paid by bank
+  const done = await bookings.create(oid, Number(owner.id), { ...terms, tenantId: Number(company.id), startAt: at(-7, 7), endAt: at(-6, 20), pickup: "Gulshan 2", destination: "Cox's Bazar", outstation: true });
+  await bookings.start(oid, Number(done.id), { startKm: 48210, startedAt: at(-7, 7) });
+  const closed = await bookings.sheet(oid, Number(done.id), { endKm: 48710, endedAt: at(-6, 21), extras: [{ label: "Tolls (Padma bridge)", amount: 1500 }, { label: "Driver food and lodging", amount: 1200 }] }, true);
+  const { PaymentService } = await import("../src/modules/payment/payment.service");
+  await new PaymentService().create(String(oid), { invoiceId: Number(closed.invoiceId), amount: closed.charge.total, method: "BANK", transactionId: "BRAC-552190", date: at(-5, 12).toISOString() } as never, Number(owner.id));
+
+  // next week: a day in the city with a ৳2,000 bKash advance
+  await bookings.create(oid, Number(owner.id), {
+    ...terms, tenantId: Number(person.id), startAt: at(5, 9), endAt: at(5, 19), pickup: "Dhanmondi 27", destination: "Purbachal (wedding)",
+    advance: { amount: 2000, method: "BKASH", transactionId: "9BKADV0001" },
+  });
+
+  // cancelled before any payment: the invoice is dropped
+  const c = await bookings.create(oid, Number(owner.id), { ...terms, tenantId: Number(company.id), startAt: at(2, 8), endAt: at(2, 18), destination: "Gazipur factory" });
+  await bookings.cancel(oid, Number(c.id), {});
 }

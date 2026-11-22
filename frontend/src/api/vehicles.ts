@@ -2,7 +2,7 @@ import client from "./client";
 import type { DocumentKind } from "./documents";
 
 export type VehicleType = "CNG" | "TAXI" | "CAR" | "MICROBUS" | "OTHER";
-export type VehicleStatus = "AVAILABLE" | "ON_LEASE" | "OFF_ROAD";
+export type VehicleStatus = "AVAILABLE" | "ON_LEASE" | "OFF_ROAD" | "ON_TRIP";
 export const VEHICLE_TYPES: VehicleType[] = ["CNG", "TAXI", "CAR", "MICROBUS", "OTHER"];
 
 export interface Vehicle {

@@ -52,6 +52,15 @@ enum VehicleStatus {
   AVAILABLE
   ON_LEASE
   OFF_ROAD
+  /// out on a rent-a-car booking
+  ON_TRIP
+}
+
+enum BookingStatus {
+  RESERVED
+  ON_TRIP
+  DONE
+  CANCELLED
 }
 
 enum UnitType {
@@ -257,6 +266,7 @@ model Organization {
   claims        PaymentClaim[]
   notices       NoticeRequest[]
   vehicles      Vehicle[]
+  bookings      Booking[]
 
   @@map("organizations")
 }
@@ -283,6 +293,7 @@ model Membership {
   claimsReviewed      PaymentClaim[]       @relation("ClaimReviewer")
   dayEntries          DayEntry[]
   noticesReviewed     NoticeRequest[]      @relation("NoticeReviewer")
+  bookings            Booking[]
 
   @@unique([userId, orgId])
   @@index([orgId])
@@ -441,6 +452,7 @@ model Tenant {
   auditLogs   AuditLog[]
   claims      PaymentClaim[]
   notices     NoticeRequest[]
+  bookings    Booking[]
 
   @@index([orgId])
   @@index([phoneNormalized])
@@ -548,6 +560,7 @@ model Invoice {
   items         InvoiceItem[]
   notifications Notification[]
   claims        PaymentClaim[]
+  booking       Booking?
 
   @@unique([agreementId, periodStart])
   @@index([flatId, month, year])
@@ -708,6 +721,7 @@ model Vehicle {
   notes     String?       @db.Text
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
+  bookings  Booking[]
 
   @@unique([orgId, regNo])
   @@map("vehicles")
@@ -892,6 +906,8 @@ model Document {
   agreement     Agreement?          @relation(fields: [agreementId], references: [id], onDelete: Cascade)
   maintenanceId BigInt?
   maintenance   MaintenanceRequest? @relation(fields: [maintenanceId], references: [id], onDelete: Cascade)
+  bookingId     BigInt?
+  booking       Booking?            @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   expiresAt     DateTime?           @db.Date
   uploadedById  BigInt?
   uploadedBy    Membership?         @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
@@ -902,7 +918,58 @@ model Document {
   @@index([agreementId])
   @@index([assetId])
   @@index([maintenanceId])
+  @@index([bookingId])
   @@map("documents")
+}
+
+/// A rent-a-car trip: the booking and its trip sheet. Its invoice has no agreement (never carried forward or auto-generated).
+model Booking {
+  id           BigInt        @id @default(autoincrement())
+  orgId        BigInt
+  org          Organization  @relation(fields: [orgId], references: [id])
+  vehicleId    BigInt
+  vehicle      Vehicle       @relation(fields: [vehicleId], references: [id])
+  /// the customer (person or company)
+  tenantId     BigInt
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  invoiceId    BigInt?       @unique
+  invoice      Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  status       BookingStatus @default(RESERVED)
+  driverName   String?       @db.VarChar(100)
+  driverPhone  String?       @db.VarChar(20)
+  pickup       String?       @db.VarChar(255)
+  destination  String?       @db.VarChar(255)
+  outstation   Boolean       @default(false)
+  /// planned
+  startAt      DateTime
+  endAt        DateTime
+  /// body rent (car + driver) per day
+  dayRate      Decimal       @db.Decimal(12, 2)
+  hourCap      Int           @default(10)
+  kmCap        Int?
+  overtimeRate Decimal       @default(0) @db.Decimal(12, 2)
+  extraKmRate  Decimal       @default(0) @db.Decimal(12, 2)
+  /// 0 = the customer fuels the car
+  fuelPerKm    Decimal       @default(0) @db.Decimal(12, 2)
+  /// trip sheet (actual)
+  startKm      Int?
+  endKm        Int?
+  startedAt    DateTime?
+  endedAt      DateTime?
+  /// [{ label, amount }]: tolls, parking, driver food, lodging
+  extras       Json?
+  cancelCharge Decimal?      @db.Decimal(12, 2)
+  notes        String?       @db.Text
+  createdById  BigInt?
+  createdBy    Membership?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  documents Document[]
+
+  @@index([orgId, vehicleId, startAt])
+  @@index([tenantId])
+  @@map("bookings")
 }
 
 /// One-time login codes for the tenant portal (phone = 8801XXXXXXXXX). Rows also count requests for throttling.

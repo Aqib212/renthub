@@ -16,11 +16,12 @@ export const uploadSchema = z.object({
   tenantId: id,
   assetId: id,
   agreementId: id,
+  bookingId: id,
   expiresAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("").transform(() => undefined)),
 });
 export type UploadInput = z.infer<typeof uploadSchema>;
 
-export const listSchema = z.object({ tenantId: id, assetId: id, agreementId: id, expiring: z.coerce.number().int().positive().optional() });
+export const listSchema = z.object({ tenantId: id, assetId: id, agreementId: id, bookingId: id, expiring: z.coerce.number().int().positive().optional() });
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -66,7 +67,7 @@ export function saveDocument(
   db: Db,
   orgId: number,
   file: File,
-  data: { kind?: DocumentKind; name?: string; tenantId?: number | bigint; assetId?: number | bigint; agreementId?: number | bigint; maintenanceId?: number | bigint; expiresAt?: string; uploadedById?: number }
+  data: { kind?: DocumentKind; name?: string; tenantId?: number | bigint; assetId?: number | bigint; agreementId?: number | bigint; maintenanceId?: number | bigint; bookingId?: number | bigint; expiresAt?: string; uploadedById?: number }
 ) {
   return db.document.create({
     data: {
@@ -80,6 +81,7 @@ export function saveDocument(
       assetId: data.assetId,
       agreementId: data.agreementId,
       maintenanceId: data.maintenanceId,
+      bookingId: data.bookingId,
       expiresAt: data.expiresAt ? new Date(`${data.expiresAt}T00:00:00Z`) : null,
       uploadedById: data.uploadedById,
     },
@@ -96,14 +98,15 @@ export class DocumentService {
       const parsed = uploadSchema.safeParse(body);
       if (!parsed.success) throw new ValidationError("Validation failed", parsed.error.errors.map((e) => ({ field: e.path.join("."), message: e.message })));
       const input: UploadInput = parsed.data;
-      if (!input.tenantId && !input.assetId && !input.agreementId) throw new ValidationError("Attach the file to a tenant, unit or agreement");
+      if (!input.tenantId && !input.assetId && !input.agreementId && !input.bookingId) throw new ValidationError("Attach the file to a tenant, unit, agreement or booking");
       // linked rows must belong to this organisation
       const checks = await Promise.all([
         input.tenantId ? prisma.tenant.count({ where: { id: input.tenantId, orgId } }) : 1,
         input.assetId ? prisma.asset.count({ where: { id: input.assetId, orgId } }) : 1,
         input.agreementId ? prisma.agreement.count({ where: { id: input.agreementId, orgId } }) : 1,
+        input.bookingId ? prisma.booking.count({ where: { id: input.bookingId, orgId } }) : 1,
       ]);
-      if (checks.includes(0)) throw new NotFoundError("Tenant, unit or agreement not found");
+      if (checks.includes(0)) throw new NotFoundError("Tenant, unit, agreement or booking not found");
       return await saveDocument(prisma, orgId, file, { ...input, uploadedById: membershipId });
     } catch (e) {
       await discardFile(file);
@@ -119,6 +122,7 @@ export class DocumentService {
         ...(q.tenantId ? { tenantId: q.tenantId } : {}),
         ...(q.assetId ? { assetId: q.assetId } : {}),
         ...(q.agreementId ? { agreementId: q.agreementId } : {}),
+        ...(q.bookingId ? { bookingId: q.bookingId } : {}),
         ...(soon ? { expiresAt: { not: null, lte: soon } } : {}),
       },
       orderBy: { createdAt: "desc" },

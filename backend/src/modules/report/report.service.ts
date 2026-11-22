@@ -342,11 +342,12 @@ export class ReportService {
       include: {
         asset: {
           select: {
-            invoices: { select: { rent: true, dueAmount: true, carriedForward: true, periodStart: true, payments: { where: { date: { gte: from, lt: toEnd }, method: { not: "DEPOSIT" } }, select: { amount: true } } } },
+            invoices: { select: { totalAmount: true, previousDue: true, dueAmount: true, carriedForward: true, periodStart: true, payments: { where: { date: { gte: from, lt: toEnd }, method: { not: "DEPOSIT" } }, select: { amount: true } } } },
             agreements: { select: { days: { where: { date: { gte: from, lte: to }, amount: 0 }, select: { id: true } } } },
             maintenance: { where: { cost: { not: null }, resolvedAt: { gte: from, lt: toEnd } }, select: { cost: true } },
           },
         },
+        bookings: { where: { status: "DONE", startAt: { lt: toEnd }, endAt: { gte: from } }, select: { id: true } },
       },
     });
     const round = (n: number) => Math.round(n * 100) / 100;
@@ -357,10 +358,12 @@ export class ReportService {
       const repairs = round(v.asset.maintenance.reduce((s, m) => s + toNumber(m.cost), 0));
       return {
         vehicle: `${v.regNo} (${v.type})`,
-        billed: round(inRange.reduce((s, i) => s + toNumber(i.rent), 0)),
+        // this period's charges (jama/rent, trip bills with their extras), not balances carried in
+        billed: round(inRange.reduce((s, i) => s + toNumber(i.totalAmount) - toNumber(i.previousDue), 0)),
         collected,
         owedNow: round(v.asset.invoices.filter((i) => !i.carriedForward).reduce((s, i) => s + toNumber(i.dueAmount), 0)),
         offDays: v.asset.agreements.reduce((s, a) => s + a.days.length, 0),
+        trips: v.bookings.length,
         repairs,
         net: round(collected - repairs),
       };

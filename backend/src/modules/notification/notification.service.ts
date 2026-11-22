@@ -143,6 +143,8 @@ export async function queueDailyReminders(today = new Date()) {
         status: template === "OVERDUE" ? "OVERDUE" : { in: ["PENDING", "PARTIALLY_PAID", "OVERDUE"] },
         // drivers pay jama in person every day: no rent reminders for daily agreements
         NOT: { agreement: { cycle: "DAILY" } },
+        // trip bills get their own SMS (TRIP_BILL), not the monthly rent schedule
+        booking: { is: null },
       },
       include: invoiceForReminder,
     });

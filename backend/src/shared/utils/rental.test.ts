@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { chargeFor, depositBalance, monthPeriod, rateFor, ruleWarnings, settle, utcDate } from "./rental";
+import { bookingClash, chargeFor, depositBalance, monthPeriod, rateFor, ruleWarnings, settle, tripCharge, utcDate } from "./rental";
 import { sameAfterHeader } from "./billing.test";
 
 const monthly = (start: Date, end?: Date) => ({ cycle: "MONTHLY" as const, rate: 15000, startDate: start, endDate: end ?? null });
@@ -104,4 +104,44 @@ test("frontend rental.ts is identical to backend (after the header line)", () =>
   const backend = readFileSync(join(__dirname, "rental.ts"), "utf8");
   const frontend = readFileSync(join(__dirname, "../../../../frontend/src/utils/rental.ts"), "utf8");
   assert.ok(sameAfterHeader(backend, frontend), "frontend/src/utils/rental.ts differs from backend/src/shared/utils/rental.ts");
+});
+
+const bd = (s: string) => new Date(`${s}:00+06:00`);
+const car = { dayRate: 4500, hourCap: 10, kmCap: 150, overtimeRate: 300, extraKmRate: 20, fuelPerKm: 0 };
+
+test("trip: one day within the caps is just body rent", () => {
+  const c = tripCharge({ ...car, startAt: bd("2026-12-05T08:00"), endAt: bd("2026-12-05T17:00"), startKm: 1000, endKm: 1100 });
+  assert.equal(c.days, 1);
+  assert.deepEqual(c.items.map((i) => i.label), ["Body rent"]);
+  assert.equal(c.total, 4500);
+});
+
+test("trip: three days with overtime on the last day, extra km and extras", () => {
+  const c = tripCharge({ ...car, startAt: bd("2026-12-05T08:00"), endAt: bd("2026-12-07T21:30"), startKm: 1000, endKm: 1600, extras: [{ label: "Toll", amount: 650 }, { label: "Driver food", amount: 0 }] });
+  assert.equal(c.days, 3);
+  // last day: 08:00 to 21:30 is 13.5 h, cap 10 -> 4 h (rounded up)
+  assert.deepEqual(c.items.map((i) => [i.label, i.amount]), [["Body rent", 13500], ["Overtime", 1200], ["Extra km", 3000], ["Toll", 650]]);
+  assert.equal(c.total, 18350);
+});
+
+test("trip: fuel per km; no km readings means no km lines", () => {
+  const f = tripCharge({ ...car, fuelPerKm: 12, startAt: bd("2026-12-05T08:00"), endAt: bd("2026-12-05T12:00"), startKm: 0, endKm: 90 });
+  assert.equal(f.items.find((i) => i.label === "Fuel")!.amount, 1080);
+  const n = tripCharge({ ...car, fuelPerKm: 12, startAt: bd("2026-12-05T08:00"), endAt: bd("2026-12-05T12:00") });
+  assert.equal(n.km, null);
+  assert.equal(n.items.length, 1);
+});
+
+test("trip: actual times win, and days follow the Bangladesh calendar", () => {
+  // 23:00 to 01:00 Bangladesh time crosses midnight: two days, although it is the same UTC date
+  const c = tripCharge({ ...car, startAt: bd("2026-12-05T08:00"), endAt: bd("2026-12-05T12:00"), startedAt: bd("2026-12-05T23:00"), endedAt: bd("2026-12-06T01:00") });
+  assert.equal(c.days, 2);
+  assert.equal(c.hours, 2);
+  assert.equal(c.total, 9000);
+});
+
+test("booking clash: overlap clashes, touching ends do not", () => {
+  const a = { start: bd("2026-12-05T08:00"), end: bd("2026-12-06T20:00") };
+  assert.equal(bookingClash(a, { start: bd("2026-12-06T10:00"), end: bd("2026-12-07T10:00") }), true);
+  assert.equal(bookingClash(a, { start: bd("2026-12-06T20:00"), end: bd("2026-12-07T10:00") }), false);
 });

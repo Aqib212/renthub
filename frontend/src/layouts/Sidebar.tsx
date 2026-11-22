@@ -16,7 +16,7 @@ import {
   EditCalendarOutlined,
   BadgeOutlined,
   GridViewOutlined,
-  HandshakeOutlined, BuildOutlined, HistoryOutlined, LocalTaxiOutlined, TodayOutlined,
+  HandshakeOutlined, BuildOutlined, HistoryOutlined, LocalTaxiOutlined, TodayOutlined, EventNoteOutlined,
   SettingsOutlined,
   SavingsOutlined,
   SmsOutlined,
@@ -52,6 +52,7 @@ const groups: { label: MessageKey; items: NavItem[] }[] = [
     items: [
       { label: "nav.vehicles", icon: <LocalTaxiOutlined />, path: "/vehicles" },
       { label: "nav.jama", icon: <TodayOutlined />, path: "/jama" },
+      { label: "nav.bookings", icon: <EventNoteOutlined />, path: "/bookings" },
     ],
   },
   {

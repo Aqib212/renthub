@@ -126,3 +126,53 @@ export function vacantDays(period: Period, agreements: { startDate: Date; endDat
   }
   return daysBetween(period.start, period.end) - covered.size;
 }
+
+/** Rent-a-car booking terms and trip sheet (times are real instants, not UTC midnights). */
+export interface TripInput {
+  startAt: Date;
+  endAt: Date;
+  /** actual times from the trip sheet; they win over the planned ones */
+  startedAt?: Date | null;
+  endedAt?: Date | null;
+  dayRate: number;
+  hourCap: number;
+  kmCap?: number | null;
+  overtimeRate: number;
+  extraKmRate: number;
+  fuelPerKm: number;
+  startKm?: number | null;
+  endKm?: number | null;
+  extras?: { label: string; amount: number }[] | null;
+}
+export interface TripLine { label: string; detail: string | null; quantity: number | null; rate: number | null; amount: number }
+
+const BD = 6 * 3_600_000; // Bangladesh is UTC+6
+const bdDay = (d: Date) => Math.floor((d.getTime() + BD) / DAY);
+
+/**
+ * The bill of one trip: body rent per Bangladesh calendar day (min 1), overtime, extra km, fuel and extras.
+ * Days before the last are covered in full (outstation: the driver stays with the car); overtime is only
+ * the last day's hours beyond `hourCap`. ponytail: per-day hour logs if owners need overtime on each day.
+ * The km cap is pooled over the trip (days × kmCap).
+ */
+export function tripCharge(t: TripInput) {
+  const start = t.startedAt ?? t.startAt;
+  const end = t.endedAt ?? t.endAt;
+  const days = Math.max(1, bdDay(end) - bdDay(start) + 1);
+  const hours = Math.max(0, (end.getTime() - start.getTime()) / 3_600_000);
+  const km = t.startKm != null && t.endKm != null ? Math.max(0, t.endKm - t.startKm) : null;
+  const items: TripLine[] = [{ label: "Body rent", detail: `${days} day${days > 1 ? "s" : ""} × ৳${t.dayRate}`, quantity: days, rate: t.dayRate, amount: r2(days * t.dayRate) }];
+  const otHours = Math.max(0, Math.ceil(hours - (days - 1) * 24 - t.hourCap));
+  if (otHours && t.overtimeRate) items.push({ label: "Overtime", detail: `${otHours} h over ${t.hourCap} h`, quantity: otHours, rate: t.overtimeRate, amount: r2(otHours * t.overtimeRate) });
+  if (km != null && t.kmCap && t.extraKmRate) {
+    const extra = Math.max(0, km - days * t.kmCap);
+    if (extra) items.push({ label: "Extra km", detail: `${extra} km over ${days * t.kmCap} km`, quantity: extra, rate: t.extraKmRate, amount: r2(extra * t.extraKmRate) });
+  }
+  if (km && t.fuelPerKm) items.push({ label: "Fuel", detail: `${km} km × ৳${t.fuelPerKm}`, quantity: km, rate: t.fuelPerKm, amount: r2(km * t.fuelPerKm) });
+  for (const x of t.extras ?? []) if (x.amount) items.push({ label: x.label || "Extra", detail: null, quantity: null, rate: null, amount: r2(x.amount) });
+  return { days, hours: r2(hours), km, items, total: r2(items.reduce((s, i) => s + i.amount, 0)) };
+}
+
+/** Two time windows overlap (touching ends do not). */
+export const bookingClash = (a: { start: Date; end: Date }, b: { start: Date; end: Date }) =>
+  a.start.getTime() < b.end.getTime() && b.start.getTime() < a.end.getTime();

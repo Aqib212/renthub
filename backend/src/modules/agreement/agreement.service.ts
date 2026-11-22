@@ -394,6 +394,12 @@ export class AgreementService {
       include: { tenant: { select: { firstName: true, lastName: true } } },
     });
     if (clash) throw new ConflictError(`This unit is still let to ${clash.tenant.firstName} ${clash.tenant.lastName}; end or give notice on that agreement first.`);
+    // a vehicle may have rent-a-car bookings ahead (startDate is a Bangladesh day: it begins at 18:00 UTC the day before)
+    const trip = await tx.booking.findFirst({
+      where: { vehicle: { assetId }, status: { in: ["RESERVED", "ON_TRIP"] }, endAt: { gt: new Date(startDate.getTime() - 6 * 3_600_000) } },
+      orderBy: { startAt: "asc" },
+    });
+    if (trip) throw new ConflictError(`This vehicle has a booking from ${new Date(trip.startAt.getTime() + 6 * 3_600_000).toISOString().slice(0, 10)}; cancel or finish it first.`);
   }
 }
 

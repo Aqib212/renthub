@@ -86,3 +86,10 @@ test("document expiry SMS says today or the days left", () => {
   assert.match(render("DOC_EXPIRY", "BN", { ...SAMPLE, daysLeft: 0 }), /আজ শেষ/);
   assert.match(render("DOC_EXPIRY", "EN", SAMPLE), /7 days left/);
 });
+
+test("booking and trip bill SMS", () => {
+  assert.match(render("BOOKING_CONFIRMED", "EN", { ...SAMPLE, unit: "Dhaka Metro-Ga 12-3456", amount: 13500, balance: 8500 }), /booking confirmed, Dhaka Metro-Ga 12-3456 on 5 Dec to 7 Dec\. Estimate Tk 13,500, Tk 8,500 after the advance/);
+  assert.match(render("BOOKING_CONFIRMED", "BN", { ...SAMPLE, tripTo: SAMPLE.tripFrom, balance: undefined }), /৫ ডিসেম্বর .*বুকিং নিশ্চিত/);
+  assert.match(render("TRIP_BILL", "EN", { ...SAMPLE, balance: 0 }), /paid in full/);
+  assert.match(render("TRIP_BILL", "BN", SAMPLE), /বাকি ৳১,৪৫০/);
+});

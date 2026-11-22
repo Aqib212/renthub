@@ -39,6 +39,8 @@ import { ActivityPage } from "@/features/admin/ActivityPage";
 import { VehiclesPage } from "@/features/vehicles/VehiclesPage";
 import { VehicleDetailPage } from "@/features/vehicles/VehicleDetailPage";
 import { JamaSheetPage } from "@/features/vehicles/JamaSheetPage";
+import { BookingsPage } from "@/features/bookings/BookingsPage";
+import { BookingDetailPage } from "@/features/bookings/BookingDetailPage";
 import { PortalLayout } from "@/features/portal/PortalLayout";
 import { PortalLoginPage } from "@/features/portal/PortalLoginPage";
 import { PortalHomePage } from "@/features/portal/PortalHomePage";
@@ -92,6 +94,8 @@ export const AppRouter = () => {
           <Route path="/vehicles" element={<VehiclesPage />} />
           <Route path="/vehicles/:id" element={<VehicleDetailPage />} />
           <Route path="/jama" element={<JamaSheetPage />} />
+          <Route path="/bookings" element={<BookingsPage />} />
+          <Route path="/bookings/:id" element={<BookingDetailPage />} />
           <Route path="/buildings/:buildingId/floors/:floorId/flats/:flatId/tenants" element={<TenantListPage />} />
           <Route path="/billing" element={<MonthlyBillingPage />} />
           <Route path="/bill-types" element={<BillTypesPage />} />
