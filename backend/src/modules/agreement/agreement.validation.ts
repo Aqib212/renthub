@@ -16,7 +16,10 @@ export const partyFields = {
 
 export const createAgreementSchema = z
   .object({
-    flatId: z.coerce.number().int().positive(),
+    flatId: z.coerce.number().int().positive().optional(),
+    vehicleId: z.coerce.number().int().positive().optional(),
+    /** vehicles: DAILY (jama) or MONTHLY; units are always MONTHLY */
+    cycle: z.enum(["MONTHLY", "DAILY"]).optional(),
     tenantId: z.coerce.number().int().positive().optional(),
     tenant: z.object(partyFields).optional(),
     rate: z.coerce.number().positive().optional(), // defaults to the unit's asking rent
@@ -29,7 +32,9 @@ export const createAgreementSchema = z
     activate: z.boolean().default(true),
     firstInvoice: z.boolean().default(false),
   })
-  .refine((v) => v.tenantId || v.tenant, { message: "Choose a tenant or enter one", path: ["tenantId"] });
+  .refine((v) => v.tenantId || v.tenant, { message: "Choose a tenant or enter one", path: ["tenantId"] })
+  .refine((v) => !!v.flatId !== !!v.vehicleId, { message: "Choose a unit or a vehicle", path: ["flatId"] })
+  .refine((v) => v.vehicleId || v.cycle !== "DAILY", { message: "Only vehicles can be let by the day", path: ["cycle"] });
 
 export const updateAgreementSchema = z.object({
   tdsPercent: z.coerce.number().min(0).max(30).optional(),

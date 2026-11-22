@@ -10,6 +10,7 @@ import { recalculateInvoice, invoiceNo } from "../invoice/invoice.service";
 import { toNumberId } from "../../shared/utils/helpers";
 import { ruleWarnings } from "../../shared/utils/rental";
 import type { CreatePaymentInput, UpdatePaymentInput } from "./payment.validation";
+import { assetVehicle, unitName, unitPlace } from "../../shared/utils/asset";
 
 function toNumber(val: unknown): number {
   if (val === null || val === undefined) return 0;
@@ -33,6 +34,7 @@ const receiptInclude = {
     include: {
       tenant: { select: { firstName: true, lastName: true, phone: true, lang: true } },
       flat: { select: { name: true, floor: { select: { name: true, building: { select: { name: true, address: true, holdingNumber: true } } } } } },
+      asset: assetVehicle,
       org: {
         select: {
           name: true,
@@ -61,8 +63,8 @@ function toReceipt(p: Prisma.PaymentGetPayload<{ include: typeof receiptInclude 
     lang: inv.tenant?.lang ?? "BN",
     invoice: { invoiceNo: invoiceNo(inv), month: inv.month, year: inv.year, totalAmount: toNumber(inv.totalAmount), paidAmount: toNumber(inv.paidAmount), dueAmount: toNumber(inv.dueAmount) },
     tenant: inv.tenant && { name: `${inv.tenant.firstName} ${inv.tenant.lastName}`, phone: inv.tenant.phone },
-    unit: { name: inv.flat.name, floorName: inv.flat.floor.name },
-    building: inv.flat.floor.building,
+    unit: { name: unitName(inv), floorName: inv.flat?.floor?.name ?? null },
+    building: inv.flat?.floor?.building ?? null,
     owner: { name: inv.org.name, phone: ownerUser?.phone ?? null, email: ownerUser?.email ?? null },
   };
 }
@@ -74,9 +76,10 @@ export class PaymentService {
     const invoice = await prisma.invoice.findFirst({
       where: { id: toNumberId(input.invoiceId), orgId: toNumberId(orgId) },
       include: {
-        agreement: { select: { bankOnly: true, rate: true } },
+        agreement: { select: { bankOnly: true, rate: true, cycle: true } },
         tenant: { select: { phone: true, lang: true } },
         flat: { select: { name: true, floor: { select: { building: { select: { name: true } } } } } },
+        asset: assetVehicle,
         org: { select: { name: true } },
       },
     });
@@ -110,6 +113,8 @@ export class PaymentService {
       await audit(tx, "payment.create", "Payment", p.id, { receiptNo: p.receiptNo, amount: Number(input.amount), method: input.method, invoiceId: Number(invoice.id) });
       // TDS is paid to the government by the company tenant, not received money: no SMS
       if (input.method === "TDS") return p;
+      // daily jama is paid in person every day: one SMS per day per driver is noise (receipt stays in the portal)
+      if (invoice.agreement?.cycle === "DAILY") return p;
       // receipt SMS, sent by the outbox drainer after this transaction commits
       await enqueue(tx, {
         orgId: invoice.orgId,
@@ -120,7 +125,7 @@ export class PaymentService {
         invoiceId: invoice.id,
         data: {
           org: invoice.org.name,
-          unit: `${invoice.flat.name}, ${invoice.flat.floor.building.name}`,
+          unit: unitPlace(invoice),
           amount: Number(input.amount),
           receiptNo: p.receiptNo!,
           balance: toNumber(after.dueAmount),
@@ -171,6 +176,7 @@ export class PaymentService {
           invoice: {
             include: {
               flat: { select: { name: true, flatNumber: true } },
+              asset: assetVehicle,
               tenant: { select: { firstName: true, lastName: true } },
             },
           },
@@ -187,8 +193,8 @@ export class PaymentService {
         collectorName: collectedBy ? `${collectedBy.user.firstName} ${collectedBy.user.lastName}` : p.collector,
         amount: toNumber(p.amount),
         invoicePeriod: `${invoice.month}/${invoice.year}`,
-        flatName: invoice.flat.name,
-        flatNumber: invoice.flat.flatNumber,
+        flatName: unitName(invoice),
+        flatNumber: invoice.flat?.flatNumber ?? null,
         tenantName: invoice.tenant ? `${invoice.tenant.firstName} ${invoice.tenant.lastName}` : null,
       })),
       meta: { page: query.page, limit: query.limit, total, totalPages: Math.ceil(total / query.limit) },

@@ -4,15 +4,17 @@ import { prisma } from "../../shared/prisma";
 import { audit } from "../../shared/audit";
 import { NotFoundError, ValidationError } from "../../shared/utils/errors";
 import { LIVE } from "../bill-type/bill-type.service";
-import { syncUnitStatus } from "../agreement/agreement.service";
+import { setBlocked, syncAssetStatus } from "../agreement/agreement.service";
+import { vehicleLabel } from "../../shared/utils/asset";
 import { discardFile, saveDocument } from "../document/document.service";
 
 const STATUS = ["NEW", "ASSIGNED", "WAITING", "IN_PROGRESS", "DONE", "CANCELLED"] as const;
 const PRIORITY = ["LOW", "NORMAL", "URGENT"] as const;
 const optId = z.coerce.number().int().positive().nullable().optional();
 
-export const createSchema = z.object({
-  flatId: z.coerce.number().int().positive(),
+const baseSchema = z.object({
+  flatId: z.coerce.number().int().positive().optional(),
+  vehicleId: z.coerce.number().int().positive().optional(),
   title: z.string().trim().min(1).max(200),
   description: z.string().max(5000).nullable().optional(),
   category: z.string().trim().max(50).nullable().optional(),
@@ -21,7 +23,8 @@ export const createSchema = z.object({
   /** the (vacant) unit can't be let until this is fixed */
   blocksUnit: z.boolean().optional(),
 });
-export const updateSchema = createSchema.omit({ flatId: true }).partial().extend({
+export const createSchema = baseSchema.refine((b) => !!b.flatId !== !!b.vehicleId, { message: "Choose a unit or a vehicle" });
+export const updateSchema = baseSchema.omit({ flatId: true, vehicleId: true }).partial().extend({
   status: z.enum(STATUS).optional(),
   cost: z.coerce.number().min(0).nullable().optional(),
   /** on DONE with a cost: record it as a REPAIRS expense */
@@ -31,6 +34,7 @@ export const listSchema = z.object({
   status: z.enum([...STATUS, "OPEN"]).optional(),
   buildingId: z.coerce.number().int().positive().optional(),
   flatId: z.coerce.number().int().positive().optional(),
+  vehicleId: z.coerce.number().int().positive().optional(),
   assignedToId: z.coerce.number().int().positive().optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(50),
@@ -41,7 +45,12 @@ type UpdateInput = z.infer<typeof updateSchema>;
 const OPEN: (typeof STATUS)[number][] = ["NEW", "ASSIGNED", "WAITING", "IN_PROGRESS"];
 const userName = { user: { select: { firstName: true, lastName: true } } } as const;
 const include = {
-  asset: { select: { unit: { select: { id: true, name: true, status: true, floor: { select: { name: true, building: { select: { id: true, name: true } } } } } } } },
+  asset: {
+    select: {
+      unit: { select: { id: true, name: true, status: true, floor: { select: { name: true, building: { select: { id: true, name: true } } } } } },
+      vehicle: { select: { id: true, regNo: true, type: true, status: true } },
+    },
+  },
   tenant: { select: { id: true, firstName: true, lastName: true, phone: true } },
   assignedTo: { select: { id: true, ...userName } },
   createdBy: { select: { id: true, ...userName } },
@@ -55,6 +64,7 @@ const shape = ({ asset, tenant, assignedTo, createdBy, ...r }: Row) => ({
   ...r,
   cost: r.cost === null ? null : Number(r.cost),
   unit: asset.unit && { id: asset.unit.id, name: asset.unit.name, status: asset.unit.status, floorName: asset.unit.floor.name, building: asset.unit.floor.building },
+  vehicle: asset.vehicle,
   tenant: tenant && { id: tenant.id, name: `${tenant.firstName} ${tenant.lastName}`, phone: tenant.phone },
   assignedTo: assignedTo && { id: assignedTo.id, name: nameOf(assignedTo) },
   createdBy: createdBy && { id: createdBy.id, name: nameOf(createdBy) },
@@ -76,7 +86,7 @@ export class MaintenanceService {
       orgId,
       ...(q.status === "OPEN" ? { status: { in: OPEN } } : q.status ? { status: q.status } : {}),
       ...(q.assignedToId ? { assignedToId: q.assignedToId } : {}),
-      ...(q.flatId ? { asset: { unit: { id: q.flatId } } } : q.buildingId ? { asset: { unit: { floor: { buildingId: q.buildingId } } } } : {}),
+      ...(q.vehicleId ? { asset: { vehicle: { id: q.vehicleId } } } : q.flatId ? { asset: { unit: { id: q.flatId } } } : q.buildingId ? { asset: { unit: { floor: { buildingId: q.buildingId } } } } : {}),
     };
     const [rows, total, counts] = await Promise.all([
       prisma.maintenanceRequest.findMany({
@@ -104,22 +114,31 @@ export class MaintenanceService {
     return shape(await this.own(orgId, id));
   }
 
-  async create(orgId: number, membershipId: number | null, input: CreateInput) {
-    const flat = await prisma.flat.findFirst({
-      where: { id: input.flatId, floor: { building: { orgId } } },
-      include: { asset: { select: { agreements: { where: LIVE, take: 1, orderBy: { startDate: "desc" }, select: { tenantId: true } } } } },
-    });
+  /** The unit or vehicle a new request is about, with its current tenant/driver. */
+  private async target(orgId: number, input: CreateInput) {
+    const live = { select: { agreements: { where: LIVE, take: 1, orderBy: { startDate: "desc" as const }, select: { tenantId: true } } } };
+    if (input.vehicleId) {
+      const v = await prisma.vehicle.findFirst({ where: { id: input.vehicleId, orgId }, include: { asset: live } });
+      if (!v) throw new NotFoundError("Vehicle not found");
+      return { assetId: v.assetId, label: vehicleLabel(v), free: v.status === "AVAILABLE", tenantId: v.asset.agreements[0]?.tenantId ?? null };
+    }
+    const flat = await prisma.flat.findFirst({ where: { id: input.flatId, floor: { building: { orgId } } }, include: { asset: live } });
     if (!flat) throw new NotFoundError("Unit not found");
+    return { assetId: flat.assetId, label: flat.name, free: flat.status === "VACANT", tenantId: flat.asset.agreements[0]?.tenantId ?? null };
+  }
+
+  async create(orgId: number, membershipId: number | null, input: CreateInput) {
+    const t = await this.target(orgId, input);
     await this.assertMember(orgId, input.assignedToId);
-    // only a vacant unit is taken off the market; an occupied one stays occupied
-    const blocksUnit = !!input.blocksUnit && flat.status === "VACANT";
+    // only a free unit/vehicle is taken off the market; a let one stays let
+    const blocksUnit = !!input.blocksUnit && t.free;
 
     const r = await prisma.$transaction(async (tx) => {
       const r = await tx.maintenanceRequest.create({
         data: {
           orgId,
-          assetId: flat.assetId,
-          tenantId: flat.asset.agreements[0]?.tenantId ?? null,
+          assetId: t.assetId,
+          tenantId: t.tenantId,
           title: input.title,
           description: input.description ?? null,
           category: input.category ?? null,
@@ -130,8 +149,8 @@ export class MaintenanceService {
           blocksUnit,
         },
       });
-      if (blocksUnit) await tx.flat.update({ where: { id: flat.id }, data: { status: "UNDER_MAINTENANCE" } });
-      await audit(tx, "maintenance.create", "MaintenanceRequest", r.id, { unit: flat.name, title: input.title });
+      if (blocksUnit) await setBlocked(tx, t.assetId, true);
+      await audit(tx, "maintenance.create", "MaintenanceRequest", r.id, { unit: t.label, title: input.title });
       return r;
     });
     return this.get(orgId, Number(r.id));
@@ -145,13 +164,13 @@ export class MaintenanceService {
     const reopening = OPEN.includes(status as any) && !!r.resolvedAt;
     const cost = input.cost !== undefined ? input.cost : r.cost === null ? null : Number(r.cost);
     const unit = r.asset.unit;
+    const label = unit?.name ?? (r.asset.vehicle ? vehicleLabel(r.asset.vehicle) : "");
 
     await prisma.$transaction(async (tx) => {
       let expenseId = r.expenseId;
       if (input.createExpense && status === "DONE" && cost && !expenseId) {
-        if (!unit) throw new ValidationError("Expenses can only be recorded for units");
         const e = await tx.expense.create({
-          data: { orgId, buildingId: unit.floor.building.id, category: "REPAIRS", amount: cost, description: `${r.title} (${unit.name})`, date: new Date() },
+          data: { orgId, buildingId: unit?.floor.building.id ?? null, category: "REPAIRS", amount: cost, description: `${r.title} (${label})`, date: new Date() },
         });
         expenseId = e.id;
       }
@@ -171,9 +190,9 @@ export class MaintenanceService {
         },
       });
       // a closed request gives the unit back
-      if (closing && r.blocksUnit && unit?.status === "UNDER_MAINTENANCE") {
-        await tx.flat.update({ where: { id: unit.id }, data: { status: "VACANT" } });
-        await syncUnitStatus(r.assetId, tx);
+      if (closing && r.blocksUnit) {
+        await setBlocked(tx, r.assetId, false);
+        await syncAssetStatus(r.assetId, tx);
       }
       if (closing || input.cost !== undefined || expenseId !== r.expenseId) {
         await audit(tx, closing ? `maintenance.${status.toLowerCase()}` : "maintenance.update", "MaintenanceRequest", r.id, {
@@ -206,7 +225,7 @@ export class MaintenanceService {
     const files = await prisma.document.findMany({ where: { maintenanceId: r.id }, select: { path: true } });
     await prisma.$transaction(async (tx) => {
       await tx.maintenanceRequest.delete({ where: { id: r.id } }); // photos cascade
-      if (r.blocksUnit && r.asset.unit?.status === "UNDER_MAINTENANCE") await tx.flat.update({ where: { id: r.asset.unit.id }, data: { status: "VACANT" } });
+      if (r.blocksUnit) await setBlocked(tx, r.assetId, false);
       await audit(tx, "maintenance.delete", "MaintenanceRequest", r.id, { title: r.title });
     });
     await Promise.all(files.map((f) => discardFile({ filename: f.path })));

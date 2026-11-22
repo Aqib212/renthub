@@ -22,7 +22,7 @@ export const ReceiptDocument = ({ receipt: r, lang }: { receipt: Receipt; lang: 
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start" gap={2} sx={{ mb: 2.5 }}>
         <Box>
           <Typography sx={{ fontFamily: "Manrope, sans-serif", fontWeight: 800, fontSize: 20 }}>{r.owner.name}</Typography>
-          <Typography sx={{ fontSize: 13, color: muted }}>{r.building.name}{r.building.address ? `, ${r.building.address}` : ""}</Typography>
+          {r.building && <Typography sx={{ fontSize: 13, color: muted }}>{r.building.name}{r.building.address ? `, ${r.building.address}` : ""}</Typography>}
           {r.owner.phone && <Typography sx={{ fontSize: 13, color: muted }}>{n(r.owner.phone)}</Typography>}
         </Box>
         <Box sx={{ textAlign: "right" }}>
@@ -33,7 +33,7 @@ export const ReceiptDocument = ({ receipt: r, lang }: { receipt: Receipt; lang: 
       </Stack>
 
       {row(t("rcp.receivedFrom"), r.tenant?.name ?? "–")}
-      {row(t("rcp.forUnit"), `${r.unit.name}, ${r.unit.floorName}`)}
+      {row(t("rcp.forUnit"), r.unit.floorName ? `${r.unit.name}, ${r.unit.floorName}` : r.unit.name)}
       {row(t("rcp.forInvoice"), `${r.invoice.invoiceNo} (${n(String(r.invoice.month).padStart(2, "0"))}/${n(r.invoice.year)})`)}
       {row(t("rcp.method"), `${t(`method.${r.method}` as any)}${r.transactionId ? ` · ${r.transactionId}` : ""}`)}
       {row(t("rcp.amount"), formatBDT(r.amount, lang), true)}

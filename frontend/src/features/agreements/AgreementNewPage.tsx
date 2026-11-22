@@ -8,6 +8,7 @@ import toast from "react-hot-toast";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { flatApi } from "@/api/flat";
 import { tenantApi } from "@/api/tenant";
+import { vehicleApi } from "@/api/vehicles";
 import { agreementApi, today } from "@/api/agreement";
 import { chargeFor, monthPeriod, ruleWarnings } from "@/utils/rental";
 import { apiError, formatBDT } from "@/utils/format";
@@ -24,7 +25,11 @@ export const AgreementNewPage = () => {
   const { data: units = [] } = useQuery({ queryKey: ["flats", "all"], queryFn: async () => (await flatApi.getAllForOwner()).data.data as UnitRow[] });
   const { data: tenants = [] } = useQuery({ queryKey: ["tenants", "all"], queryFn: async () => (await tenantApi.getAllForOwner()).data.data as Tenant[] });
 
+  const { data: vehicles = [] } = useQuery({ queryKey: ["vehicles"], queryFn: vehicleApi.list });
+  const [what, setWhat] = useState<"unit" | "vehicle">(params.get("vehicleId") ? "vehicle" : "unit");
   const [flatId, setFlatId] = useState<number | "">(params.get("flatId") ? Number(params.get("flatId")) : "");
+  const [vehicleId, setVehicleId] = useState<number | "">(params.get("vehicleId") ? Number(params.get("vehicleId")) : "");
+  const [cycle, setCycle] = useState<"DAILY" | "MONTHLY">("DAILY");
   const [who, setWho] = useState<"new" | "existing">("new");
   const [existing, setExisting] = useState<Tenant | null>(null);
   const [person, setPerson] = useState({ firstName: "", lastName: "", phone: "", nid: "", occupation: "", members: 1 });
@@ -32,23 +37,34 @@ export const AgreementNewPage = () => {
 
   const unit = units.find((u) => u.id === flatId);
   const free = units.filter((u) => u.status === "VACANT" || u.id === flatId);
+  const vehicle = vehicles.find((v) => v.id === vehicleId);
+  const freeVehicles = vehicles.filter((v) => v.status === "AVAILABLE" || v.id === vehicleId);
+  const isVehicle = what === "vehicle";
+  const daily = isVehicle && cycle === "DAILY";
 
   // prefill from the unit's asking terms
   useEffect(() => {
     if (unit) setTerms((t) => ({ ...t, rate: Number(unit.rent), deposit: Number(unit.advance ?? 0) + Number(unit.securityDeposit ?? 0) }));
   }, [unit?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (vehicle) {
+      const c = vehicle.type === "CAR" || vehicle.type === "MICROBUS" ? "MONTHLY" : "DAILY";
+      setCycle(c);
+      setTerms((t) => ({ ...t, rate: Number(vehicle.rate ?? 0), deposit: 0 }));
+    }
+  }, [vehicle?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const first = useMemo(() => {
     if (!terms.startDate || !terms.rate) return null;
     const s = utc(terms.startDate);
-    return chargeFor({ cycle: "MONTHLY", rate: terms.rate, startDate: s, endDate: terms.endDate ? utc(terms.endDate) : null }, [], monthPeriod(s.getUTCMonth() + 1, s.getUTCFullYear()));
-  }, [terms.rate, terms.startDate, terms.endDate]);
-  const warnings = ruleWarnings({ rate: terms.rate, depositReceived: terms.deposit });
+    return chargeFor({ cycle: daily ? "DAILY" : "MONTHLY", rate: terms.rate, startDate: s, endDate: terms.endDate ? utc(terms.endDate) : null }, [], monthPeriod(s.getUTCMonth() + 1, s.getUTCFullYear()));
+  }, [terms.rate, terms.startDate, terms.endDate, daily]);
+  const warnings = ruleWarnings({ rate: terms.rate, depositReceived: terms.deposit, kind: isVehicle ? "VEHICLE" : "UNIT" });
 
   const save = useMutation({
     mutationFn: (activate: boolean) =>
       agreementApi.create({
-        flatId: Number(flatId),
+        ...(isVehicle ? { vehicleId: Number(vehicleId), cycle } : { flatId: Number(flatId) }),
         ...(who === "existing" && existing ? { tenantId: existing.id } : { tenant: { ...person, phone: person.phone || undefined, nid: person.nid || undefined, occupation: person.occupation || undefined } }),
         rate: terms.rate,
         startDate: terms.startDate,
@@ -65,28 +81,48 @@ export const AgreementNewPage = () => {
     onError: (e) => toast.error(apiError(e)),
   });
 
-  const ready = !!flatId && terms.rate > 0 && !!terms.startDate && (who === "existing" ? !!existing : !!person.firstName && !!person.lastName);
+  const ready = (isVehicle ? !!vehicleId : !!flatId) && terms.rate > 0 && !!terms.startDate && (who === "existing" ? !!existing : !!person.firstName && !!person.lastName);
   const setP = (k: keyof typeof person) => (e: React.ChangeEvent<HTMLInputElement>) => setPerson({ ...person, [k]: k === "members" ? Number(e.target.value) : e.target.value });
 
   return (
     <Box>
-      <PageHeader title="New agreement" subtitle="Let a unit: who, at what rent, from when, and the deposit received." />
+      <PageHeader title="New agreement" subtitle="Let a unit or lease a vehicle: who, at what rent or jama, from when, and the deposit received." />
       <Grid container spacing={2.5}>
         <Grid item xs={12} lg={8}>
           <Stack spacing={2.5}>
             <Card>
               <CardContent sx={{ display: "grid", gap: 2 }}>
-                <Typography variant="h6" fontSize={17}>1. Unit</Typography>
-                <TextField select label="Vacant unit" value={flatId} onChange={(e) => setFlatId(Number(e.target.value))} helperText={!free.length ? "No vacant units: end or give notice on an agreement first." : " "}>
-                  {free.map((u) => <MenuItem key={u.id} value={u.id}>{u.floor.building.name} · {u.floor.name} · {u.name} ({formatBDT(u.rent)})</MenuItem>)}
-                </TextField>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
+                  <Typography variant="h6" fontSize={17}>1. {isVehicle ? "Vehicle" : "Unit"}</Typography>
+                  {vehicles.length > 0 && (
+                    <ToggleButtonGroup exclusive size="small" value={what} onChange={(_, v) => v && setWhat(v)} aria-label="Unit or vehicle">
+                      <ToggleButton value="unit">Unit</ToggleButton>
+                      <ToggleButton value="vehicle">Vehicle</ToggleButton>
+                    </ToggleButtonGroup>
+                  )}
+                </Stack>
+                {isVehicle ? (
+                  <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: { sm: "2fr 1fr" } }}>
+                    <TextField select label="Free vehicle" value={vehicleId} onChange={(e) => setVehicleId(Number(e.target.value))} helperText={!freeVehicles.length ? "No free vehicles: end the driver's lease first." : " "}>
+                      {freeVehicles.map((v) => <MenuItem key={v.id} value={v.id}>{v.regNo} · {v.type}{v.rate ? ` (${formatBDT(v.rate)})` : ""}</MenuItem>)}
+                    </TextField>
+                    <TextField select label="Billing" value={cycle} onChange={(e) => setCycle(e.target.value as "DAILY" | "MONTHLY")} helperText=" ">
+                      <MenuItem value="DAILY">Daily jama</MenuItem>
+                      <MenuItem value="MONTHLY">Monthly</MenuItem>
+                    </TextField>
+                  </Box>
+                ) : (
+                  <TextField select label="Vacant unit" value={flatId} onChange={(e) => setFlatId(Number(e.target.value))} helperText={!free.length ? "No vacant units: end or give notice on an agreement first." : " "}>
+                    {free.map((u) => <MenuItem key={u.id} value={u.id}>{u.floor.building.name} · {u.floor.name} · {u.name} ({formatBDT(u.rent)})</MenuItem>)}
+                  </TextField>
+                )}
               </CardContent>
             </Card>
 
             <Card>
               <CardContent sx={{ display: "grid", gap: 2 }}>
                 <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
-                  <Typography variant="h6" fontSize={17}>2. Tenant</Typography>
+                  <Typography variant="h6" fontSize={17}>2. {isVehicle ? "Driver" : "Tenant"}</Typography>
                   <ToggleButtonGroup exclusive size="small" value={who} onChange={(_, v) => v && setWho(v)} aria-label="New or existing tenant">
                     <ToggleButton value="new">New person</ToggleButton>
                     <ToggleButton value="existing">Existing</ToggleButton>
@@ -105,7 +141,7 @@ export const AgreementNewPage = () => {
                     <TextField label="First name" required value={person.firstName} onChange={setP("firstName")} />
                     <TextField label="Last name" required value={person.lastName} onChange={setP("lastName")} />
                     <TextField label="Phone" value={person.phone} onChange={setP("phone")} />
-                    <TextField label="NID" value={person.nid} onChange={setP("nid")} helperText="Needed for the police (CIMS) form" />
+                    <TextField label="NID" value={person.nid} onChange={setP("nid")} helperText={isVehicle ? " " : "Needed for the police (CIMS) form"} />
                     <TextField label="Occupation" value={person.occupation} onChange={setP("occupation")} />
                     <TextField label="People living there" type="number" inputProps={{ min: 1 }} value={person.members} onChange={setP("members")} helperText="Used for per-person charges" />
                   </Box>
@@ -117,17 +153,17 @@ export const AgreementNewPage = () => {
               <CardContent sx={{ display: "grid", gap: 2 }}>
                 <Typography variant="h6" fontSize={17}>3. Terms</Typography>
                 <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: { sm: "1fr 1fr" } }}>
-                  <TextField label="Monthly rent (৳)" type="number" value={terms.rate || ""} onChange={(e) => setTerms({ ...terms, rate: Number(e.target.value) })}
-                    helperText={terms.rate > 25000 ? "Above ৳25,000: rent must be paid through a bank (NBR)" : " "} />
+                  <TextField label={daily ? "Jama per day (৳)" : "Monthly rent (৳)"} type="number" value={terms.rate || ""} onChange={(e) => setTerms({ ...terms, rate: Number(e.target.value) })}
+                    helperText={daily ? "Off days are marked on the Today's jama sheet" : !isVehicle && terms.rate > 25000 ? "Above ৳25,000: rent must be paid through a bank (NBR)" : " "} />
                   <TextField label="Deposit received (৳)" type="number" value={terms.deposit || ""} onChange={(e) => setTerms({ ...terms, deposit: Number(e.target.value) })}
                     helperText="Advance + security, kept in the deposit ledger" />
-                  <TextField label="Move-in date" type="date" InputLabelProps={{ shrink: true }} value={terms.startDate} onChange={(e) => setTerms({ ...terms, startDate: e.target.value })} />
+                  <TextField label={isVehicle ? "Handover date" : "Move-in date"} type="date" InputLabelProps={{ shrink: true }} value={terms.startDate} onChange={(e) => setTerms({ ...terms, startDate: e.target.value })} />
                   <TextField label="End date (optional)" type="date" InputLabelProps={{ shrink: true }} value={terms.endDate} onChange={(e) => setTerms({ ...terms, endDate: e.target.value })}
                     helperText="Leave empty for an open-ended agreement" />
                 </Box>
                 <FormControlLabel
                   control={<Checkbox checked={terms.firstInvoice} onChange={(e) => setTerms({ ...terms, firstInvoice: e.target.checked })} />}
-                  label="Create the first month's invoice now"
+                  label={daily ? "Create this month's jama statement now" : "Create the first month's invoice now"}
                 />
               </CardContent>
             </Card>
@@ -139,14 +175,16 @@ export const AgreementNewPage = () => {
             <CardContent sx={{ display: "grid", gap: 1.5 }}>
               <Typography variant="h6" fontSize={17}>Summary</Typography>
               <WarningsAlert warnings={warnings} />
-              <Row label="Unit" value={unit ? `${unit.floor.building.name} · ${unit.name}` : "–"} />
-              <Row label="Monthly rent" value={terms.rate ? formatBDT(terms.rate) : "–"} />
+              {isVehicle
+                ? <Row label="Vehicle" value={vehicle ? `${vehicle.regNo} (${vehicle.type})` : "–"} />
+                : <Row label="Unit" value={unit ? `${unit.floor.building.name} · ${unit.name}` : "–"} />}
+              <Row label={daily ? "Jama per day" : "Monthly rent"} value={terms.rate ? formatBDT(terms.rate) : "–"} />
               <Row label="Deposit" value={formatBDT(terms.deposit)} />
               <Row
                 label="First month"
-                value={first ? `${formatBDT(first.amount)}${first.prorated ? ` (${first.days} of ${first.monthDays} days)` : ""}` : "–"}
+                value={first ? `${formatBDT(first.amount)}${daily ? ` (${first.days} days)` : first.prorated ? ` (${first.days} of ${first.monthDays} days)` : ""}` : "–"}
               />
-              <Typography variant="caption" color="text.secondary">Rent is due by the organisation's due day each month; notice period comes from Settings.</Typography>
+              <Typography variant="caption" color="text.secondary">{daily ? "Jama is collected every day; a driver gives 7 days' notice by default." : "Rent is due by the organisation's due day each month; notice period comes from Settings."}</Typography>
               <Stack direction="row" spacing={1} sx={{ pt: 1 }}>
                 <Button variant="outlined" disabled={!ready || save.isPending} onClick={() => save.mutate(false)}>Save draft</Button>
                 <Button variant="contained" disabled={!ready || save.isPending} onClick={() => save.mutate(true)} sx={{ flex: 1 }}>Start agreement</Button>

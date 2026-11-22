@@ -11,6 +11,7 @@ import { depositBalance, ruleWarnings } from "../../shared/utils/rental";
 import { AgreementService } from "../agreement/agreement.service";
 import { MaintenanceService } from "../maintenance/maintenance.service";
 import { settingsOf } from "../org/org.service";
+import { vehicleLabel } from "../../shared/utils/asset";
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const claimSchema = z.object({
@@ -57,7 +58,7 @@ export class PortalService {
         tenant: { select: { id: true, firstName: true, lastName: true, lang: true } },
         revisions: { orderBy: { effectiveFrom: "asc" } },
         deposits: { select: { type: true, amount: true } },
-        asset: { select: { unit: { select: { id: true, name: true, floor: { select: { name: true, building: { select: { name: true, address: true } } } } } } } },
+        asset: { select: { unit: { select: { id: true, name: true, floor: { select: { name: true, building: { select: { name: true, address: true } } } } } }, vehicle: { select: { regNo: true, type: true } } } },
         invoices: {
           where: { carriedForward: false, dueAmount: { gt: 0 } },
           orderBy: { periodStart: "desc" },
@@ -91,6 +92,8 @@ export class PortalService {
         status: a.status,
         org: { id: a.org.id, name: a.org.name, payInfo: settingsOf(a.org.settings).payInfo },
         unit: a.asset.unit && { name: a.asset.unit.name, floorName: a.asset.unit.floor.name, building: a.asset.unit.floor.building },
+        vehicle: a.asset.vehicle,
+        cycle: a.cycle,
         rent: Number([...a.revisions].reverse().find((r) => r.effectiveFrom <= today)?.rate ?? a.rate),
         dueDay: a.dueDay,
         startDate: a.startDate,
@@ -147,13 +150,13 @@ export class PortalService {
       orderBy: { createdAt: "desc" },
       take: 100,
       include: {
-        asset: { select: { unit: { select: { name: true, floor: { select: { building: { select: { name: true } } } } } } } },
+        asset: { select: { unit: { select: { name: true, floor: { select: { building: { select: { name: true } } } } } }, vehicle: { select: { regNo: true, type: true } } } },
         photos: { select: { id: true } },
       },
     });
     return rows.map(({ asset, ...r }) => ({
       id: r.id, title: r.title, description: r.description, category: r.category, status: r.status, createdAt: r.createdAt, resolvedAt: r.resolvedAt,
-      unit: asset.unit ? `${asset.unit.name}, ${asset.unit.floor.building.name}` : null,
+      unit: asset.unit ? `${asset.unit.name}, ${asset.unit.floor.building.name}` : asset.vehicle ? vehicleLabel(asset.vehicle) : null,
       photos: r.photos.map((p) => p.id),
     }));
   }
@@ -161,9 +164,12 @@ export class PortalService {
   async createMaintenance(tenantIds: number[], input: z.infer<typeof maintenanceSchema>) {
     const a = await this.ownAgreement(tenantIds, input.agreementId);
     if (a.status !== "ACTIVE" && a.status !== "NOTICE") throw new ValidationError("This tenancy has ended");
-    const flat = await prisma.flat.findUnique({ where: { assetId: a.assetId }, select: { id: true } });
-    if (!flat) throw new ValidationError("Only units can have maintenance requests");
-    const r = await maintenance.create(Number(a.orgId), null, { flatId: Number(flat.id), title: input.title, description: input.description, category: input.category });
+    const [flat, vehicle] = await Promise.all([
+      prisma.flat.findUnique({ where: { assetId: a.assetId }, select: { id: true } }),
+      prisma.vehicle.findUnique({ where: { assetId: a.assetId }, select: { id: true } }),
+    ]);
+    const target = flat ? { flatId: Number(flat.id) } : { vehicleId: Number(vehicle!.id) };
+    const r = await maintenance.create(Number(a.orgId), null, { ...target, title: input.title, description: input.description, category: input.category });
     return { id: r.id, orgId: Number(a.orgId), tenantId: Number(a.tenantId) };
   }
 

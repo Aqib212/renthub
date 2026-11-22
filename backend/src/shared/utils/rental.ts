@@ -32,29 +32,38 @@ export function rateFor(a: AgreementTerms, revisions: Revision[], on: Date) {
   return r ? r.rate : a.rate;
 }
 
+export interface DayOverride { date: Date; amount: number }
+
 /**
- * The main charge (rent) of one period, or null when the agreement does not cover it.
+ * The main charge (rent / jama) of one period, or null when the agreement does not cover it.
  * MONTHLY: full rate for a full month; pro-rated by day for the first and last month.
  * ponytail: a revision taking effect mid-month applies from the next period; split by day if owners ask.
+ * DAILY: each covered day costs the rate in force that day, unless `days` overrides it (0 = off day).
  */
-export function chargeFor(a: AgreementTerms, revisions: Revision[], period: Period) {
-  if (a.cycle !== "MONTHLY") throw new Error(`${a.cycle} billing is not implemented yet (phase 6-7)`);
+export function chargeFor(a: AgreementTerms, revisions: Revision[], period: Period, days: DayOverride[] = []) {
+  if (a.cycle !== "MONTHLY" && a.cycle !== "DAILY") throw new Error(`${a.cycle} billing is not implemented yet (phase 7)`);
   const from = new Date(Math.max(a.startDate.getTime(), period.start.getTime()));
   const to = new Date(Math.min((a.endDate ?? period.end).getTime(), period.end.getTime()));
   if (from > to) return null;
   const rate = rateFor(a, revisions, from);
-  const days = daysBetween(from, to);
+  const covered = daysBetween(from, to);
   const monthDays = daysBetween(period.start, period.end);
-  const full = days === monthDays;
-  return {
-    amount: full ? rate : r2((rate * days) / monthDays),
-    rate,
-    days,
-    monthDays,
-    prorated: !full,
-    from,
-    to,
-  };
+  const prorated = covered !== monthDays;
+  if (a.cycle === "DAILY") {
+    const over = new Map(days.map((d) => [d.date.getTime(), d.amount]));
+    let amount = 0;
+    let offDays = 0;
+    for (let t = from.getTime(); t <= to.getTime(); t += DAY) {
+      const o = over.get(t);
+      if (o === undefined) amount += rateFor(a, revisions, new Date(t));
+      else {
+        amount += o;
+        if (o === 0) offDays++;
+      }
+    }
+    return { amount: r2(amount), rate, days: covered, monthDays, offDays, prorated, from, to };
+  }
+  return { amount: prorated ? r2((rate * covered) / monthDays) : rate, rate, days: covered, monthDays, offDays: 0, prorated, from, to };
 }
 
 export function depositBalance(entries: DepositLine[]) {
@@ -79,14 +88,17 @@ export interface RuleInput {
   noticeDate?: Date;
   endDate?: Date;
   noticeDays?: number;
+  /** vehicles skip the house rules (DNCC deposit and increase limits) */
+  kind?: "UNIT" | "VEHICLE";
 }
 
 export function ruleWarnings(i: RuleInput): string[] {
   const w: string[] = [];
-  if (i.depositReceived && i.rate > 0 && i.depositReceived > 3 * i.rate) {
+  const house = i.kind !== "VEHICLE";
+  if (house && i.depositReceived && i.rate > 0 && i.depositReceived > 3 * i.rate) {
     w.push("Deposit is more than 3 months' rent (DNCC guidance allows 1–3; the Rent Act allows 1).");
   }
-  if (i.newRevision) {
+  if (house && i.newRevision) {
     const m = i.newRevision.effectiveFrom.getUTCMonth() + 1;
     if (m !== 6 && m !== 7) w.push("Rent increases are expected in June–July (DNCC).");
     const last = [...(i.revisions ?? [])].sort((a, b) => b.effectiveFrom.getTime() - a.effectiveFrom.getTime())[0]?.effectiveFrom ?? i.startDate;

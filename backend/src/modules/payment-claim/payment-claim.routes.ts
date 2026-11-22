@@ -11,6 +11,7 @@ import { env } from "../../config/env";
 import { NotFoundError, ValidationError } from "../../shared/utils/errors";
 import { PaymentService } from "../payment/payment.service";
 import { enqueue } from "../notification/notification.service";
+import { assetVehicle, unitName, unitPlace } from "../../shared/utils/asset";
 
 const payments = new PaymentService();
 const confirmSchema = z.object({ amount: z.coerce.number().positive().max(10_000_000).optional() });
@@ -18,7 +19,7 @@ const rejectSchema = z.object({ reason: z.string().trim().min(1).max(255) });
 
 const include = {
   tenant: { select: { id: true, firstName: true, lastName: true, phone: true, lang: true } },
-  invoice: { select: { id: true, month: true, year: true, dueAmount: true, carriedForward: true, flat: { select: { name: true, floor: { select: { building: { select: { name: true } } } } } } } },
+  invoice: { select: { id: true, month: true, year: true, dueAmount: true, carriedForward: true, flat: { select: { name: true, floor: { select: { building: { select: { name: true } } } } } }, asset: assetVehicle } },
   reviewedBy: { select: { user: { select: { firstName: true, lastName: true } } } },
   payment: { select: { id: true, receiptNo: true } },
 } as const;
@@ -87,7 +88,7 @@ router.post("/:id/reject", validate(rejectSchema), asyncHandler(async (req: Auth
       invoiceId: c.invoiceId,
       data: {
         org: org.name,
-        unit: `${c.invoice.flat.name}, ${c.invoice.flat.floor.building.name}`,
+        unit: unitPlace(c.invoice),
         amount: Number(c.amount),
         reference: `${c.method} ${c.transactionId}`,
         reason: req.body.reason,

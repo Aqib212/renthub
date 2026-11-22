@@ -54,12 +54,12 @@ export const AgreementDetailPage = () => {
       <PageHeader
         title={`${a.tenant.firstName} ${a.tenant.lastName}`}
         subtitle={<>
-          {a.unit ? `${a.unit.building.name} · ${a.unit.floorName} · ${a.unit.name}` : "–"} · since {fmtDate(a.startDate)}{" "}
+          {a.unit ? `${a.unit.building.name} · ${a.unit.floorName} · ${a.unit.name}` : a.vehicle ? `${a.vehicle.regNo} (${a.vehicle.type})${a.cycle === "DAILY" ? " · daily jama" : ""}` : "–"} · since {fmtDate(a.startDate)}{" "}
           <Chip size="small" color={AGREEMENT_STATUS[a.status].color} label={AGREEMENT_STATUS[a.status].label} sx={{ ml: 1 }} />
         </>}
         actions={<>
           <Button variant="outlined" component={RouterLink} to={`/tenants/${a.tenant.id}`}>Tenant profile</Button>
-          <Button variant="outlined" component={RouterLink} to={`/agreements/${a.id}/deed`}>Print agreement</Button>
+          {a.unit && <Button variant="outlined" component={RouterLink} to={`/agreements/${a.id}/deed`}>Print agreement</Button>}
           {a.status === "DRAFT" && <>
             <Button color="error" onClick={() => removeDraft.mutate()}>Delete draft</Button>
             <Button variant="contained" onClick={() => activate.mutate()} disabled={activate.isPending}>Start agreement</Button>

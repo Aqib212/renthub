@@ -5,7 +5,8 @@ import { validate } from "../../middleware/validate.middleware";
 import { asyncHandler } from "../../shared/utils/asyncHandler";
 import { sendResult } from "../../shared/utils/apiResponse";
 import { upload } from "../../shared/utils/upload";
-import { DocumentService, listSchema } from "./document.service";
+import { DocumentService, expiringDocs, expiringSchema, listSchema } from "./document.service";
+import { todayBd } from "../vehicle/vehicle.service";
 
 const service = new DocumentService();
 const router = Router();
@@ -15,6 +16,9 @@ router.use(authenticate, requireOrg, writes("document:write"));
 
 router.get("/", validate(listSchema, "query"), asyncHandler(async (req: AuthRequest, res: Response) => {
   sendResult(res, await service.list(req.org!.id, req.query as any));
+}));
+router.get("/expiring", validate(expiringSchema, "query"), asyncHandler(async (req: AuthRequest, res: Response) => {
+  sendResult(res, await expiringDocs(req.org!.id, Number(req.query.days ?? 30), new Date(`${todayBd()}T00:00:00.000Z`)));
 }));
 router.get("/:id/file", asyncHandler(async (req: AuthRequest, res: Response) => {
   const { doc, abs } = await service.file(req.org!.id, Number(req.params.id));

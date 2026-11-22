@@ -38,9 +38,42 @@ test("rate revisions apply from their effective date", () => {
   assert.equal(chargeFor(monthly(utcDate(2024, 1, 1)), revs, dec)!.amount, 16500);
 });
 
-test("daily and trip cycles are not implemented yet", () => {
-  assert.throws(() => chargeFor({ ...monthly(utcDate(2026, 1, 1)), cycle: "DAILY" }, [], dec), /not implemented/);
+test("trip cycle is not implemented yet", () => {
   assert.throws(() => chargeFor({ ...monthly(utcDate(2026, 1, 1)), cycle: "TRIP" }, [], dec), /not implemented/);
+});
+
+const daily = (start: Date, end?: Date) => ({ cycle: "DAILY" as const, rate: 1200, startDate: start, endDate: end ?? null });
+
+test("daily jama: every covered day at the rate", () => {
+  const c = chargeFor(daily(utcDate(2026, 1, 1)), [], dec)!;
+  assert.equal(c.amount, 31 * 1200);
+  assert.equal(c.offDays, 0);
+  assert.equal(c.prorated, false);
+});
+
+test("daily jama: mid-month start and end count only those days", () => {
+  const c = chargeFor(daily(utcDate(2026, 12, 10), utcDate(2026, 12, 20)), [], dec)!;
+  assert.equal(c.days, 11);
+  assert.equal(c.amount, 11 * 1200);
+});
+
+test("daily jama: off days and overrides", () => {
+  const days = [{ date: utcDate(2026, 12, 5), amount: 0 }, { date: utcDate(2026, 12, 6), amount: 0 }, { date: utcDate(2026, 12, 7), amount: 600 }];
+  const c = chargeFor(daily(utcDate(2026, 1, 1)), [], dec, days)!;
+  assert.equal(c.offDays, 2);
+  assert.equal(c.amount, 28 * 1200 + 600);
+  // overrides outside the agreement are ignored
+  assert.equal(chargeFor(daily(utcDate(2026, 12, 8)), [], dec, days)!.amount, 24 * 1200);
+});
+
+test("daily jama: a revision applies from its own day", () => {
+  const c = chargeFor(daily(utcDate(2026, 1, 1)), [{ effectiveFrom: utcDate(2026, 12, 21), rate: 1300 }], dec)!;
+  assert.equal(c.amount, 20 * 1200 + 11 * 1300);
+});
+
+test("vehicles skip the house deposit and increase rules", () => {
+  assert.equal(ruleWarnings({ rate: 1200, depositReceived: 10000, kind: "VEHICLE" }).length, 0);
+  assert.equal(ruleWarnings({ rate: 1200, depositReceived: 10000 }).length, 1);
 });
 
 test("deposit ledger balance and move-out settlement", () => {

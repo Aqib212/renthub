@@ -39,6 +39,21 @@ enum AssetKind {
   VEHICLE
 }
 
+enum VehicleType {
+  CNG
+  TAXI
+  CAR
+  MICROBUS
+  OTHER
+}
+
+/// ON_LEASE is set from agreements (syncAssetStatus); OFF_ROAD by a blocking maintenance request.
+enum VehicleStatus {
+  AVAILABLE
+  ON_LEASE
+  OFF_ROAD
+}
+
 enum UnitType {
   FLAT
   ROOM
@@ -58,7 +73,7 @@ enum PartyKind {
   COMPANY
 }
 
-/// MONTHLY now; DAILY/WEEKLY (driver jama) and TRIP (rent-a-car) are reserved for phases 6-7.
+/// MONTHLY (houses, monthly car leases) and DAILY (driver jama); WEEKLY and TRIP are reserved.
 enum BillingCycle {
   MONTHLY
   DAILY
@@ -173,6 +188,13 @@ enum DocumentKind {
   PHOTO
   UTILITY
   OTHER
+  REGISTRATION
+  FITNESS
+  TAX_TOKEN
+  ROUTE_PERMIT
+  INSURANCE
+  LICENCE
+  ENLISTMENT
 }
 
 model User {
@@ -234,6 +256,7 @@ model Organization {
   auditLogs     AuditLog[]
   claims        PaymentClaim[]
   notices       NoticeRequest[]
+  vehicles      Vehicle[]
 
   @@map("organizations")
 }
@@ -258,6 +281,7 @@ model Membership {
   maintenanceCreated  MaintenanceRequest[] @relation("MaintenanceCreator")
   documentsUploaded   Document[]
   claimsReviewed      PaymentClaim[]       @relation("ClaimReviewer")
+  dayEntries          DayEntry[]
   noticesReviewed     NoticeRequest[]      @relation("NoticeReviewer")
 
   @@unique([userId, orgId])
@@ -489,8 +513,9 @@ model BillEntry {
 
 model Invoice {
   id             BigInt        @id @default(autoincrement())
-  flatId         BigInt
-  flat           Flat          @relation(fields: [flatId], references: [id])
+  /// null for vehicle invoices (they have only assetId)
+  flatId         BigInt?
+  flat           Flat?         @relation(fields: [flatId], references: [id], onDelete: Restrict)
   tenantId       BigInt?
   tenant         Tenant?       @relation(fields: [tenantId], references: [id])
   orgId          BigInt
@@ -613,6 +638,7 @@ model Asset {
   createdAt DateTime     @default(now())
 
   unit        Flat?
+  vehicle     Vehicle?
   agreements  Agreement[]
   invoices    Invoice[]
   maintenance MaintenanceRequest[]
@@ -654,11 +680,53 @@ model Agreement {
   invoices  Invoice[]
   documents Document[]
   notices   NoticeRequest[]
+  days      DayEntry[]
 
   @@index([orgId, status])
   @@index([assetId, status])
   @@index([tenantId])
   @@map("agreements")
+}
+
+/// The VEHICLE detail of an asset (like Flat for UNIT).
+model Vehicle {
+  id        BigInt        @id @default(autoincrement())
+  orgId     BigInt
+  org       Organization  @relation(fields: [orgId], references: [id])
+  assetId   BigInt        @unique
+  asset     Asset         @relation(fields: [assetId], references: [id])
+  type      VehicleType
+  regNo     String        @db.VarChar(50)
+  model     String?       @db.VarChar(100)
+  year      Int?
+  color     String?       @db.VarChar(30)
+  chassisNo String?       @db.VarChar(50)
+  engineNo  String?       @db.VarChar(50)
+  /// asking jama per day / rent per month for the next agreement
+  rate      Decimal?      @db.Decimal(12, 2)
+  status    VehicleStatus @default(AVAILABLE)
+  notes     String?       @db.Text
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@unique([orgId, regNo])
+  @@map("vehicles")
+}
+
+/// Exceptions on a DAILY agreement: an off day (amount 0) or a different jama. Other days cost the rate.
+model DayEntry {
+  id          BigInt      @id @default(autoincrement())
+  agreementId BigInt
+  agreement   Agreement   @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  date        DateTime    @db.Date
+  amount      Decimal     @db.Decimal(12, 2)
+  reason      String?     @db.VarChar(255)
+  createdById BigInt?
+  createdBy   Membership? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime    @default(now())
+
+  @@unique([agreementId, date])
+  @@map("day_entries")
 }
 
 model RateRevision {

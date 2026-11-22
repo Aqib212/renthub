@@ -6,10 +6,12 @@ import { prisma } from "../../shared/prisma";
 import { audit } from "../../shared/audit";
 import { uploadsDir } from "../../shared/utils/upload";
 import { NotFoundError, ValidationError } from "../../shared/utils/errors";
+import { currentDocs, daysLeft } from "../../shared/notify/expiry";
+import { vehicleLabel } from "../../shared/utils/asset";
 
 const id = z.coerce.number().int().positive().optional();
 export const uploadSchema = z.object({
-  kind: z.enum(["NID", "AGREEMENT", "PHOTO", "UTILITY", "OTHER"]).default("OTHER"),
+  kind: z.enum(["NID", "AGREEMENT", "PHOTO", "UTILITY", "OTHER", "REGISTRATION", "FITNESS", "TAX_TOKEN", "ROUTE_PERMIT", "INSURANCE", "LICENCE", "ENLISTMENT"]).default("OTHER"),
   name: z.string().trim().max(200).optional(),
   tenantId: id,
   assetId: id,
@@ -21,6 +23,42 @@ export type UploadInput = z.infer<typeof uploadSchema>;
 export const listSchema = z.object({ tenantId: id, assetId: id, agreementId: id, expiring: z.coerce.number().int().positive().optional() });
 
 type Db = PrismaClient | Prisma.TransactionClient;
+
+export const expiringSchema = z.object({ days: z.coerce.number().int().min(0).max(365).default(30) });
+
+/**
+ * Documents that expire within `days` of `today` (or already have), newest renewal only, soonest first,
+ * each with what it belongs to. Shared by the dashboard list and the daily reminder SMS.
+ */
+export async function expiringDocs(orgId: number, days: number, today: Date) {
+  const until = new Date(today.getTime() + days * 86_400_000);
+  // every dated document, so a later renewal can supersede one that is about to expire
+  const docs = await prisma.document.findMany({
+    where: { orgId, expiresAt: { not: null } },
+    select: {
+      id: true, kind: true, name: true, expiresAt: true, tenantId: true, assetId: true, agreementId: true,
+      tenant: { select: { firstName: true, lastName: true } },
+      asset: { select: { unit: { select: { id: true, name: true } }, vehicle: { select: { id: true, regNo: true, type: true } } } },
+      agreement: { select: { id: true, tenant: { select: { firstName: true, lastName: true } } } },
+    },
+  });
+  return currentDocs(docs)
+    .filter((d) => d.expiresAt! <= until)
+    .sort((a, b) => a.expiresAt!.getTime() - b.expiresAt!.getTime())
+    .map(({ tenant, asset, agreement, ...d }) => ({
+      ...d,
+      daysLeft: daysLeft(d.expiresAt!, today),
+      owner: asset?.vehicle
+        ? { type: "vehicle" as const, id: asset.vehicle.id, label: vehicleLabel(asset.vehicle) }
+        : asset?.unit
+          ? { type: "unit" as const, id: asset.unit.id, label: asset.unit.name }
+          : tenant
+            ? { type: "tenant" as const, id: d.tenantId!, label: `${tenant.firstName} ${tenant.lastName}` }
+            : agreement
+              ? { type: "agreement" as const, id: agreement.id, label: `${agreement.tenant.firstName} ${agreement.tenant.lastName}` }
+              : null,
+    }));
+}
 type File = { filename: string; originalname: string; mimetype: string; size: number };
 
 /** Store an already-uploaded multer file as a vault row. Used by the vault, tenant forms and maintenance photos. */

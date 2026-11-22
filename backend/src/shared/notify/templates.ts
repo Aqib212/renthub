@@ -1,8 +1,8 @@
 // SMS texts in Bangla and English. Pure functions: easy to test and to preview in the Messages screen.
 
 export type Lang = "BN" | "EN";
-export type TemplateKey = "RECEIPT" | "RENT_DUE" | "DUE_TODAY" | "OVERDUE" | "CLAIM_REJECTED" | "NOTICE_ACCEPTED" | "NOTICE_DECLINED";
-export const TEMPLATE_KEYS: TemplateKey[] = ["RECEIPT", "RENT_DUE", "DUE_TODAY", "OVERDUE", "CLAIM_REJECTED", "NOTICE_ACCEPTED", "NOTICE_DECLINED"];
+export type TemplateKey = "RECEIPT" | "RENT_DUE" | "DUE_TODAY" | "OVERDUE" | "CLAIM_REJECTED" | "NOTICE_ACCEPTED" | "NOTICE_DECLINED" | "DOC_EXPIRY";
+export const TEMPLATE_KEYS: TemplateKey[] = ["RECEIPT", "RENT_DUE", "DUE_TODAY", "OVERDUE", "CLAIM_REJECTED", "NOTICE_ACCEPTED", "NOTICE_DECLINED", "DOC_EXPIRY"];
 
 export interface TemplateData {
   org: string; // landlord / organisation name
@@ -19,6 +19,11 @@ export interface TemplateData {
   reference?: string;
   /** "2027-01-31" (NOTICE_ACCEPTED) */
   moveOutDate?: string;
+  /** DOC_EXPIRY: the document's name and its expiry day "2026-12-31" (sent to the owner; amount unused) */
+  document?: string;
+  expiresOn?: string;
+  /** DOC_EXPIRY: 0 = today */
+  daysLeft?: number;
 }
 
 const BN_DIGITS = "০১২৩৪৫৬৭৮৯";
@@ -74,6 +79,10 @@ export function render(key: TemplateKey, lang: Lang, d: TemplateData): string {
       return bn
         ? `${d.org}: ${d.unit} ছাড়ার নোটিশ নিয়ে কথা বলতে চাই${d.reason ? `: ${d.reason}` : ""}। যোগাযোগ করুন।`
         : `${d.org}: about your notice for ${d.unit}${d.reason ? `: ${d.reason}` : ""}. Please contact us.`;
+    case "DOC_EXPIRY":
+      return bn
+        ? `${d.org}: ${d.unit}-এর ${d.document ?? ""}-এর মেয়াদ ${d.daysLeft ? `${dayName(d.expiresOn!, lang)} শেষ হবে (${toBnDigits(d.daysLeft)} দিন বাকি)` : "আজ শেষ"}। নবায়ন করুন।`
+        : `${d.org}: ${d.document ?? ""} for ${d.unit} ${d.daysLeft ? `expires ${dayName(d.expiresOn!, lang)} (${d.daysLeft} days left)` : "expires today"}. Please renew.`;
   }
 }
 
@@ -98,5 +107,8 @@ export const SAMPLE: TemplateData = {
   balance: 1450,
   reason: "Transaction ID not found",
   reference: "bKash 9AB7C2XK1",
+  document: "Fitness certificate",
+  expiresOn: "2026-12-31",
+  daysLeft: 7,
   moveOutDate: "2027-01-31",
 };

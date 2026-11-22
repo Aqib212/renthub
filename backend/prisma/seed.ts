@@ -10,6 +10,7 @@ async function main() {
   console.log("🌱 Seeding database...");
 
   // Clean existing data in dependency order
+  await prisma.dayEntry.deleteMany();
   await prisma.portalSession.deleteMany();
   await prisma.portalOtp.deleteMany();
   await prisma.paymentClaim.deleteMany();
@@ -34,6 +35,7 @@ async function main() {
   await prisma.flat.deleteMany();
   await prisma.floor.deleteMany();
   await prisma.building.deleteMany();
+  await prisma.vehicle.deleteMany();
   await prisma.asset.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.ownerProfile.deleteMany();
@@ -52,6 +54,7 @@ async function main() {
       password,
       firstName: "Rafiq",
       lastName: "Hasan",
+      phone: "01700000001", // gets the document-expiry SMS
       status: "ACTIVE",
       emailVerified: true,
     },
@@ -512,6 +515,8 @@ async function main() {
     data: { orgId: org.id, agreementId: a1.id, tenantId: t1.id, noticeDate: new Date("2026-11-15T00:00:00Z"), moveOutDate: new Date("2027-01-31T00:00:00Z"), reason: "Moving to Chattogram for work" },
   });
 
+  await seedVehicles(org.id);
+
   // ==============================
   // 8. ELECTRICITY METER READINGS
   // ==============================
@@ -552,3 +557,104 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
+
+/**
+ * Phase 6: two CNGs on daily jama and a car on a monthly lease, from the 1st of last month, with off days,
+ * daily cash, and vehicle documents that expire soon. Invoices and payments go through the app's services
+ * (vehicles only, so the unit invoices above are untouched).
+ */
+async function seedVehicles(orgId: bigint) {
+  const { InvoiceService } = await import("../src/modules/invoice/invoice.service");
+  const { PaymentService } = await import("../src/modules/payment/payment.service");
+  const { uploadsDir } = await import("../src/shared/utils/upload");
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const invoices = new InvoiceService();
+  const payments = new PaymentService();
+
+  const now = new Date(Date.now() + 6 * 3_600_000); // Bangladesh date
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth() + 1; // this month
+  const today = now.getUTCDate();
+  const d = (yy: number, mm: number, dd: number) => new Date(Date.UTC(yy, mm - 1, dd));
+  const ymd = (x: Date) => x.toISOString().slice(0, 10);
+  const last = d(y, m - 1, 1); // 1st of last month
+  const ly = last.getUTCFullYear();
+  const lm = last.getUTCMonth() + 1;
+
+  const driver = (firstName: string, lastName: string, phone: string, drivingLicense: string) =>
+    prisma.tenant.create({ data: { orgId, firstName, lastName, phone, phoneNormalized: normalizeBdPhone(phone), drivingLicense, occupation: "Driver" } });
+  const d1 = await driver("Jamal", "Uddin", "01811111111", "DK0123456L00001");
+  const d2 = await driver("Shafiq", "Islam", "01822222222", "DK0123456L00002");
+  const d3 = await driver("Rubel", "Hossain", "01833333333", "DK0123456L00003");
+
+  const mk =async (type: "CNG" | "CAR", regNo: string, rate: number, extra: { model?: string; year?: number; color?: string } = {}) => {
+    const asset = await prisma.asset.create({ data: { orgId, kind: "VEHICLE" } });
+    return prisma.vehicle.create({ data: { orgId, assetId: asset.id, type, regNo, rate, status: "ON_LEASE", ...extra } });
+  };
+  const v1 = await mk("CNG", "DHAKA METRO-THA 11-2345", 1200, { model: "Bajaj RE", year: 2019, color: "Green" });
+  const v2 = await mk("CNG", "DHAKA METRO-THA 12-6789", 1200, { model: "Bajaj RE", year: 2021, color: "Green" });
+  const v3 = await mk("CAR", "DHAKA METRO-GA 27-4411", 20000, { model: "Toyota Axio", year: 2016, color: "White" });
+
+  const lease = (v: { assetId: bigint }, tenantId: bigint, cycle: "DAILY" | "MONTHLY", rate: number, start: Date, deposit: number) =>
+    prisma.agreement.create({
+      data: {
+        orgId, assetId: v.assetId, tenantId, cycle, rate, startDate: start, status: "ACTIVE", noticeDays: 7, dueDay: 10,
+        deposits: { create: { type: "RECEIVED", amount: deposit, date: start, note: "Security at handover" } },
+      },
+    });
+  const g1 = await lease(v1, d1.id, "DAILY", 1200, last, 10000);
+  const g2 = await lease(v2, d2.id, "DAILY", 1200, d(ly, lm, 10), 10000);
+  const g3 = await lease(v3, d3.id, "MONTHLY", 20000, last, 20000);
+
+  // off days and a half day
+  await prisma.dayEntry.createMany({
+    data: [
+      { agreementId: g1.id, date: d(ly, lm, 5), amount: 0, reason: "Gas shortage" },
+      { agreementId: g1.id, date: d(ly, lm, 6), amount: 0, reason: "Driver sick" },
+      ...(today > 3 ? [{ agreementId: g1.id, date: d(y, m, 3), amount: 0, reason: "Hartal" }] : []),
+      ...(today > 2 ? [{ agreementId: g2.id, date: d(y, m, 2), amount: 600, reason: "Half day (repair)" }] : []),
+    ],
+  });
+
+  // daily cash: every working day paid, except two days last month (arrears) and today (still to collect).
+  // Last month is billed and paid before this month's invoice carries its balance forward.
+  const offDays = new Set((await prisma.dayEntry.findMany({ where: { amount: 0 } })).map((e) => `${e.agreementId}:${ymd(e.date)}`));
+  const halfDays = new Map((await prisma.dayEntry.findMany({ where: { amount: { gt: 0 } } })).map((e) => [`${e.agreementId}:${ymd(e.date)}`, Number(e.amount)]));
+  const payDays = async (from: Date, to: Date) => {
+    for (const g of [g1, g2]) {
+      for (let t = Math.max(from.getTime(), g.startDate.getTime()); t < to.getTime(); t += 86_400_000) {
+        const day = ymd(new Date(t));
+        const key = `${g.id}:${day}`;
+        if (offDays.has(key)) continue;
+        if (g.id === g1.id && (day === ymd(d(ly, lm, 12)) || day === ymd(d(ly, lm, 20)))) continue; // unpaid days
+        const inv = await prisma.invoice.findFirstOrThrow({ where: { agreementId: g.id, periodStart: { lte: new Date(t) } }, orderBy: { periodStart: "desc" } });
+        await payments.create(String(orgId), { invoiceId: Number(inv.id), amount: halfDays.get(key) ?? 1200, method: "CASH", collector: "Rafiq Mia", date: day } as never);
+      }
+    }
+  };
+  for (const v of [v1, v2, v3]) await invoices.generateForAsset(Number(orgId), v.assetId, lm, ly);
+  await payDays(last, d(y, m, 1));
+  const carLast = await prisma.invoice.findFirstOrThrow({ where: { agreementId: g3.id, month: lm, year: ly } });
+  await payments.create(String(orgId), { invoiceId: Number(carLast.id), amount: 20000, method: "BANK", transactionId: "DBBL-778812", date: ymd(d(ly, lm, 9)) } as never);
+  for (const v of [v1, v2, v3]) await invoices.generateForAsset(Number(orgId), v.assetId, m, y);
+  await payDays(d(y, m, 1), d(y, m, today)); // the car's rent for this month is still open
+
+  // vehicle documents (placeholder files) with expiry dates around today
+  const owner = await prisma.membership.findFirstOrThrow({ where: { orgId, role: "OWNER" } });
+  const base = d(y, m, today);
+  const plus = (n: number) => new Date(base.getTime() + n * 86_400_000);
+  const doc = async (kind: string, name: string, links: { assetId?: bigint; tenantId?: bigint }, expiresAt: Date) => {
+    const file = `seed-${randomBytes(6).toString("hex")}.txt`;
+    fs.writeFileSync(path.join(uploadsDir, file), `${name} (demo file)
+`);
+    return prisma.document.create({ data: { orgId, kind: kind as never, name, path: file, mime: "text/plain", size: 20, expiresAt, uploadedById: owner.id, ...links } });
+  };
+  await doc("FITNESS", "Fitness certificate", { assetId: v1.assetId }, plus(7));
+  await doc("TAX_TOKEN", "Tax token", { assetId: v1.assetId }, plus(-3));
+  await doc("INSURANCE", "Insurance (old)", { assetId: v1.assetId }, plus(5));
+  await doc("INSURANCE", "Insurance (renewed)", { assetId: v1.assetId }, plus(360));
+  await doc("ROUTE_PERMIT", "Route permit", { assetId: v2.assetId }, plus(30));
+  await doc("FITNESS", "Fitness certificate", { assetId: v3.assetId }, plus(120));
+  await doc("LICENCE", "Driving licence", { tenantId: d1.id }, plus(200));
+}

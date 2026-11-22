@@ -6,7 +6,7 @@ import {
 } from "@mui/material";
 import {
   TrendingUp, Payments, Apartment, Warning, AccountBalanceWallet,
-  PictureAsPdf, TableChart, Savings, EventBusy, Badge, RequestQuote,
+  PictureAsPdf, TableChart, Savings, EventBusy, Badge, RequestQuote, LocalTaxi,
 } from "@mui/icons-material";
 import { useQuery } from "@tanstack/react-query";
 import { reportApi } from "@/api/report";
@@ -23,6 +23,7 @@ const REPORT_TYPES = [
   { value: "vacancy_loss", label: "Vacancy loss", icon: <EventBusy />, color: "#B42318" },
   { value: "collection_by_collector", label: "By collector", icon: <Badge />, color: "#1D4ED8" },
   { value: "tax_statement", label: "Tax statement", icon: <RequestQuote />, color: "#8A5200" },
+  { value: "vehicle_statement", label: "Vehicle statement", icon: <LocalTaxi />, color: "#0E7490" },
 ];
 
 // Bangladesh income year: 1 July – 30 June

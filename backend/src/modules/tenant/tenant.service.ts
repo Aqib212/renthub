@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../shared/prisma";
 import { NotFoundError, ValidationError } from "../../shared/utils/errors";
 import { toNumberId } from "../../shared/utils/helpers";
-import { AgreementService, syncUnitStatus } from "../agreement/agreement.service";
+import { AgreementService, syncAssetStatus } from "../agreement/agreement.service";
 import type { CreateTenantInput, UpdateTenantInput } from "./tenant.validation";
 import { actorStore } from "../../shared/audit";
 import { saveDocument } from "../document/document.service";
@@ -123,7 +123,7 @@ export class TenantService {
       const endDate = ymd(input.moveOutDate);
       await prisma.$transaction(async (tx) => {
         const a = await tx.agreement.update({ where: { id: current.agreementId! }, data: { status: "ENDED", endDate: new Date(`${endDate}T00:00:00.000Z`) } });
-        await syncUnitStatus(a.assetId, tx);
+        await syncAssetStatus(a.assetId, tx);
       });
     }
     if (files?.agreementDoc && current.agreementId) {
@@ -144,7 +144,7 @@ export class TenantService {
     await prisma.$transaction(async (tx) => {
       await tx.agreement.deleteMany({ where: { tenantId: tenant.id } });
       await tx.tenant.delete({ where: { id: tenant.id } });
-      for (const a of tenant.agreements) await syncUnitStatus(a.assetId, tx);
+      for (const a of tenant.agreements) await syncAssetStatus(a.assetId, tx);
     });
   }
 }

@@ -4,7 +4,7 @@ import { NotFoundError, ConflictError, ValidationError } from "../../shared/util
 import { toNumberId } from "../../shared/utils/helpers";
 import { calcCharge, splitShares, BERC_RESIDENTIAL, type BillTypeCalc, type ChargeResult } from "../../shared/utils/billing";
 import { audit } from "../../shared/audit";
-import { chargeFor, monthPeriod } from "../../shared/utils/rental";
+import { chargeFor, monthPeriod, type DayOverride } from "../../shared/utils/rental";
 
 /** An agreement that currently holds its asset. */
 export const LIVE = { status: { in: ["ACTIVE", "NOTICE"] } } satisfies Prisma.AgreementWhereInput;
@@ -50,15 +50,16 @@ export const billableFlatWhere = (orgId: number, month: number, year: number): P
   asset: { agreements: { some: agreementsInMonth(month, year) } },
 });
 
-const agreementInclude = { tenant: true, revisions: true } satisfies Prisma.AgreementInclude;
-type AgreementRow = Prisma.AgreementGetPayload<{ include: typeof agreementInclude }>;
+export const agreementInclude = { tenant: true, revisions: true } satisfies Prisma.AgreementInclude;
+export type AgreementRow = Prisma.AgreementGetPayload<{ include: typeof agreementInclude }>;
 
 /** The agreement's rent for the month (pro-rated in the first and last month). */
-export function rentFor(a: AgreementRow, month: number, year: number) {
+export function rentFor(a: AgreementRow, month: number, year: number, days: DayOverride[] = []) {
   return chargeFor(
     { cycle: a.cycle, rate: Number(a.rate), startDate: a.startDate, endDate: a.endDate },
     a.revisions.map((r) => ({ effectiveFrom: r.effectiveFrom, rate: Number(r.rate) })),
-    monthPeriod(month, year)
+    monthPeriod(month, year),
+    days
   );
 }
 

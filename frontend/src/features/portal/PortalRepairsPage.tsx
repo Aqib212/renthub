@@ -39,7 +39,7 @@ export const PortalRepairsPage = () => {
           </CardContent>
         </Card>
       ))}
-      {open && <RepairDialog agreements={live.map((x) => ({ id: x.agreementId, label: x.unit ? `${x.unit.name}, ${x.unit.building.name}` : x.org.name }))} onClose={() => setOpen(false)} />}
+      {open && <RepairDialog agreements={live.map((x) => ({ id: x.agreementId, label: x.unit ? `${x.unit.name}, ${x.unit.building.name}` : x.vehicle ? `${x.vehicle.regNo} (${x.vehicle.type})` : x.org.name }))} onClose={() => setOpen(false)} />}
     </Stack>
   );
 };

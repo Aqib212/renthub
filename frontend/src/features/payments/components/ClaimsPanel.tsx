@@ -17,7 +17,7 @@ export interface ClaimRow {
   note: string | null;
   createdAt: string;
   tenant: { firstName: string; lastName: string; phone: string | null };
-  invoice: { id: number; month: number; year: number; dueAmount: number; flat: { name: string; floor: { building: { name: string } } } };
+  invoice: { id: number; month: number; year: number; dueAmount: number; flat: { name: string; floor: { building: { name: string } } } | null; asset?: { vehicle: { regNo: string; type: string } | null } | null };
 }
 
 export const claimsApi = {
@@ -53,7 +53,7 @@ export const ClaimsPanel = () => {
                   {formatBDT(c.amount)} · {METHOD_LABELS[c.method]} · {c.transactionId}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {c.tenant.firstName} {c.tenant.lastName} · {c.invoice.flat.name}, {c.invoice.flat.floor.building.name} · {MONTH_NAMES[c.invoice.month - 1]} {c.invoice.year} bill · paid {new Date(c.paidOn).toLocaleDateString("en-GB", { timeZone: "UTC" })}
+                  {c.tenant.firstName} {c.tenant.lastName} · {c.invoice.flat ? `${c.invoice.flat.name}, ${c.invoice.flat.floor.building.name}` : c.invoice.asset?.vehicle ? `${c.invoice.asset.vehicle.regNo} (${c.invoice.asset.vehicle.type})` : ""} · {MONTH_NAMES[c.invoice.month - 1]} {c.invoice.year} bill · paid {new Date(c.paidOn).toLocaleDateString("en-GB", { timeZone: "UTC" })}
                   {c.note ? ` · “${c.note}”` : ""}
                 </Typography>
               </Stack>

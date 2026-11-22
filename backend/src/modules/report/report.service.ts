@@ -4,6 +4,7 @@ import { prisma } from "../../shared/prisma";
 import { LIVE } from "../bill-type/bill-type.service";
 import { toNumberId } from "../../shared/utils/helpers";
 import { daysBetween, depositBalance, fiscalYearRange, monthPeriod, utcDate, vacantDays } from "../../shared/utils/rental";
+import { assetVehicle, unitName } from "../../shared/utils/asset";
 
 function toNumber(val: unknown): number {
   if (val === null || val === undefined) return 0;
@@ -24,6 +25,7 @@ export class ReportService {
       case "vacancy_loss": return this.vacancyLoss(orgId, query);
       case "collection_by_collector": return this.collectionByCollector(orgId, query);
       case "tax_statement": return this.taxStatement(orgId, query);
+      case "vehicle_statement": return this.vehicleStatement(orgId, query);
       default: return [];
     }
   }
@@ -181,6 +183,7 @@ export class ReportService {
         orderBy: [{ year: "desc" }, { month: "desc" }],
         include: {
           flat: { select: { name: true, flatNumber: true } },
+          asset: assetVehicle,
           tenant: { select: { firstName: true, lastName: true, phone: true } },
         },
       }),
@@ -199,12 +202,12 @@ export class ReportService {
         totalPaid: toNumber(aggregate._sum.paidAmount),
         totalDue: toNumber(aggregate._sum.dueAmount),
       },
-      invoices: invoices.map(({ flat, tenant, ...inv }) => ({
+      invoices: invoices.map(({ flat, asset, tenant, ...inv }) => ({
         ...inv,
         totalAmount: toNumber(inv.totalAmount),
         paidAmount: toNumber(inv.paidAmount),
         dueAmount: toNumber(inv.dueAmount),
-        flatName: flat.name,
+        flatName: unitName({ flat, asset }),
         tenantName: tenant ? `${tenant.firstName} ${tenant.lastName}` : null,
         tenantPhone: tenant?.phone || null,
       })),
@@ -326,6 +329,51 @@ export class ReportService {
     };
   }
 
+  /** Per vehicle over a date range (default: this month): jama/rent billed, collected, owed now, off days, repairs, net. */
+  private async vehicleStatement(orgId: string, query: any) {
+    const oid = toNumberId(orgId);
+    const today = new Date();
+    const from = query.dateFrom ? new Date(`${query.dateFrom}T00:00:00Z`) : utcDate(today.getUTCFullYear(), today.getUTCMonth() + 1, 1);
+    const to = query.dateTo ? new Date(`${query.dateTo}T00:00:00Z`) : utcDate(today.getUTCFullYear(), today.getUTCMonth() + 2, 0);
+    const toEnd = new Date(to.getTime() + 86_400_000);
+    const vehicles = await prisma.vehicle.findMany({
+      where: { orgId: oid },
+      orderBy: { regNo: "asc" },
+      include: {
+        asset: {
+          select: {
+            invoices: { select: { rent: true, dueAmount: true, carriedForward: true, periodStart: true, payments: { where: { date: { gte: from, lt: toEnd }, method: { not: "DEPOSIT" } }, select: { amount: true } } } },
+            agreements: { select: { days: { where: { date: { gte: from, lte: to }, amount: 0 }, select: { id: true } } } },
+            maintenance: { where: { cost: { not: null }, resolvedAt: { gte: from, lt: toEnd } }, select: { cost: true } },
+          },
+        },
+      },
+    });
+    const round = (n: number) => Math.round(n * 100) / 100;
+    const monthStart = utcDate(from.getUTCFullYear(), from.getUTCMonth() + 1, 1);
+    const rows = vehicles.map((v) => {
+      const inRange = v.asset.invoices.filter((i) => i.periodStart && i.periodStart >= monthStart && i.periodStart <= to);
+      const collected = round(v.asset.invoices.reduce((s, i) => s + i.payments.reduce((t, p) => t + toNumber(p.amount), 0), 0));
+      const repairs = round(v.asset.maintenance.reduce((s, m) => s + toNumber(m.cost), 0));
+      return {
+        vehicle: `${v.regNo} (${v.type})`,
+        billed: round(inRange.reduce((s, i) => s + toNumber(i.rent), 0)),
+        collected,
+        owedNow: round(v.asset.invoices.filter((i) => !i.carriedForward).reduce((s, i) => s + toNumber(i.dueAmount), 0)),
+        offDays: v.asset.agreements.reduce((s, a) => s + a.days.length, 0),
+        repairs,
+        net: round(collected - repairs),
+      };
+    });
+    const total = (k: "billed" | "collected" | "owedNow" | "repairs" | "net") => round(rows.reduce((s, r) => s + r[k], 0));
+    return {
+      type: "vehicle_statement",
+      period: { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) },
+      summary: { vehicles: rows.length, billed: total("billed"), collected: total("collected"), owedNow: total("owedNow"), repairs: total("repairs"), net: total("net") },
+      rows,
+    };
+  }
+
   /** Money taken by each staff member, by method, and the cash they still hold. */
   private async collectionByCollector(orgId: string, query: any) {
     const dateFilter = this.dateFilter(query);
@@ -405,9 +453,9 @@ export class ReportService {
       if (!byBuilding.has(k)) byBuilding.set(k, blank());
       return byBuilding.get(k)!;
     };
-    for (const i of invoices) row(i.flat.floor.buildingId).rentBilled += toNumber(i.rent);
+    for (const i of invoices) row(i.flat?.floor.buildingId).rentBilled += toNumber(i.rent);
     for (const p of payments) {
-      const r = row(p.invoice.flat.floor.buildingId);
+      const r = row(p.invoice.flat?.floor.buildingId);
       const a = toNumber(p.amount);
       if (BANK.includes(p.method)) r.bank += a;
       else if (MOBILE.includes(p.method)) r.mobile += a;
@@ -426,7 +474,7 @@ export class ReportService {
     const names = new Map(buildings.map((b) => [String(b.id), b]));
     const round = (n: number) => Math.round(n * 100) / 100;
     const rows = [...byBuilding.entries()].map(([k, r]) => ({
-      building: names.get(k)?.name ?? "General (no building)",
+      building: names.get(k)?.name ?? "Vehicles and general (no building)",
       holding: names.get(k)?.holdingNumber ?? "",
       rentBilled: round(r.rentBilled),
       receivedBank: round(r.bank),
@@ -608,6 +656,7 @@ export class ReportService {
       case "vacancy_loss":
       case "collection_by_collector":
       case "tax_statement":
+      case "vehicle_statement":
         return data.rows || [];
       case "expense_detail":
         return (data.expenses || []).map((e: any) => ({

@@ -18,6 +18,7 @@ const FILTERS: { value: string; label: string }[] = [
   { value: "document", label: "Documents" },
   { value: "claim", label: "Portal payments" },
   { value: "notice", label: "Move-out requests" },
+  { value: "jama", label: "Jama off days" },
 ];
 
 /** Plain-English line for an audit row; the raw metadata is shown beside it. */
@@ -51,6 +52,8 @@ const describe = (r: AuditRow) => {
     case "notice.withdraw": return "Withdrew the move-out request";
     case "notice.accepted": return `Accepted the tenant's notice (leaving ${m.moveOutDate})`;
     case "notice.declined": return `Declined the tenant's notice${m.note ? `: ${m.note}` : ""}`;
+    case "jama.day_set": return `${m.vehicle ?? "Vehicle"} ${m.date}: ${Number(m.amount) === 0 ? "off day" : `jama ${tk(m.amount)}`}${m.reason ? ` (${m.reason})` : ""}`;
+    case "jama.day_clear": return `${m.vehicle ?? "Vehicle"} ${m.date}: back to normal jama`;
     default:
       if (r.action.startsWith("maintenance.")) return `Maintenance: ${m.title ?? ""} ${r.action.split(".")[1]}${m.cost ? ` (${tk(m.cost)})` : ""}`;
       return r.action;

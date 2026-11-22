@@ -18,9 +18,14 @@ interface Props {
   open: boolean;
   onClose: () => void;
   preselectedInvoiceId?: number;
+  /** e.g. the day's jama from the jama sheet (default: the invoice's due amount) */
+  presetAmount?: number;
+  /** payment date YYYY-MM-DD (default: now) */
+  presetDate?: string;
+  onSaved?: () => void;
 }
 
-export function PaymentFormDialog({ open, onClose, preselectedInvoiceId }: Props) {
+export function PaymentFormDialog({ open, onClose, preselectedInvoiceId, presetAmount, presetDate, onSaved }: Props) {
   const queryClient = useQueryClient();
   const [invoiceId, setInvoiceId] = useState<number>(preselectedInvoiceId ?? 0);
   const [amount, setAmount] = useState("");
@@ -56,10 +61,17 @@ export function PaymentFormDialog({ open, onClose, preselectedInvoiceId }: Props
     }
   }, [open, preselectedInvoiceId]);
 
-  const selectedInvoice = invoiceList?.data?.find((inv) => inv.id === invoiceId);
+  // the preselected invoice may be older than the 100 listed
+  const { data: preselected } = useQuery({
+    queryKey: ["invoice", preselectedInvoiceId],
+    queryFn: () => invoiceApi.getById(preselectedInvoiceId!),
+    enabled: open && !!preselectedInvoiceId,
+  });
+  const selectedInvoice = invoiceList?.data?.find((inv) => inv.id === invoiceId)
+    ?? (preselected && preselected.id === invoiceId ? { ...preselected, flatName: preselected.flat.name } as unknown as NonNullable<typeof invoiceList>["data"][number] : undefined);
 
   useEffect(() => {
-    if (selectedInvoice && open) setAmount(String(selectedInvoice.dueAmount));
+    if (selectedInvoice && open) setAmount(String(presetAmount ?? selectedInvoice.dueAmount));
   }, [selectedInvoice?.id, open]);
 
   // company tenants withhold TDS from the rent and pay it to the government; it settles that part of the invoice
@@ -79,6 +91,7 @@ export function PaymentFormDialog({ open, onClose, preselectedInvoiceId }: Props
       transactionId: transactionId || undefined,
       collector: collector || undefined,
       remarks: remarks || undefined,
+      date: presetDate,
     }),
     onSuccess: (p: any) => {
       queryClient.invalidateQueries({ queryKey: ["payments"] });
@@ -88,6 +101,7 @@ export function PaymentFormDialog({ open, onClose, preselectedInvoiceId }: Props
       queryClient.invalidateQueries({ queryKey: ["billing-month"] });
       toast.success("Payment recorded");
       toastWarnings(p?.warnings); // e.g. cash on rent above ৳25,000 (NBR)
+      onSaved?.();
       onClose();
     },
     onError: (e) => toast.error(apiError(e, "Could not record payment")),
@@ -107,7 +121,8 @@ export function PaymentFormDialog({ open, onClose, preselectedInvoiceId }: Props
           <Stack spacing={2} sx={{ mt: 1 }}>
             <Autocomplete
               options={invoiceOptions}
-              value={invoiceOptions.find((o) => o.id === invoiceId) || null}
+              value={invoiceOptions.find((o) => o.id === invoiceId) || (selectedInvoice ? { id: selectedInvoice.id, label: `${selectedInvoice.invoiceNo} · ${selectedInvoice.flatName}` } : null)}
+              isOptionEqualToValue={(o, v) => o.id === v.id}
               onChange={(_, v) => setInvoiceId(v?.id ?? 0)}
               inputValue={invoiceInput}
               onInputChange={(_, v) => setInvoiceInput(v)}

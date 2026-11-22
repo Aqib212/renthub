@@ -1,7 +1,8 @@
 import cron from "node-cron";
 import { prisma } from "./shared/prisma";
 import { InvoiceService } from "./modules/invoice/invoice.service";
-import { drain, queueDailyReminders } from "./modules/notification/notification.service";
+import { drain, queueDailyReminders, queueExpiryReminders } from "./modules/notification/notification.service";
+import { todayBd } from "./modules/vehicle/vehicle.service";
 
 const invoiceService = new InvoiceService();
 
@@ -56,6 +57,12 @@ export function startScheduledTasks() {
       if (queued) console.log(`[Cron] Queued ${queued} rent reminders`);
     } catch (error) {
       console.error("[Cron] Reminders failed:", error);
+    }
+    try {
+      const { queued } = await queueExpiryReminders(new Date(`${todayBd()}T00:00:00.000Z`));
+      if (queued) console.log(`[Cron] Queued ${queued} document expiry reminders`);
+    } catch (error) {
+      console.error("[Cron] Expiry reminders failed:", error);
     }
   });
 
