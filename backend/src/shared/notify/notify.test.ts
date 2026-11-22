@@ -93,3 +93,11 @@ test("booking and trip bill SMS", () => {
   assert.match(render("TRIP_BILL", "EN", { ...SAMPLE, balance: 0 }), /paid in full/);
   assert.match(render("TRIP_BILL", "BN", SAMPLE), /বাকি ৳১,৪৫০/);
 });
+
+test("BulkSMSBD answers: 202 is sent, codes become readable errors", async () => {
+  const { bulkSmsResult } = await import("../../modules/notification/sms.sender");
+  assert.deepEqual(bulkSmsResult({ response_code: 202, success_message: "SMS Submitted Successfully" }), { ok: true });
+  assert.match(bulkSmsResult({ response_code: 1007, error_message: "Balance Insufficient" }).error!, /balance is empty/);
+  assert.match(bulkSmsResult({ response_code: 1099, error_message: "Something new" }).error!, /1099: Something new/);
+  assert.match(bulkSmsResult(null).error!, /unexpected/);
+});

@@ -248,15 +248,22 @@ model User {
 
 /// A landlord business (workspace). Every business row belongs to one.
 model Organization {
-  id        BigInt   @id @default(autoincrement())
-  name      String   @db.VarChar(200)
-  plan      String   @default("FREE") @db.VarChar(30)
-  unitLimit Int?
-  settings  Json?
+  id          BigInt    @id @default(autoincrement())
+  name        String    @db.VarChar(200)
+  /// FREE | STARTER | PRO | CUSTOM (shared/plans.ts); CUSTOM uses unitLimit
+  plan        String    @default("FREE") @db.VarChar(30)
+  unitLimit   Int?
+  /// end of the paid plan; after it the FREE limit applies
+  paidUntil   DateTime?
+  /// set by the super-admin: staff and portal are refused
+  suspendedAt DateTime?
+  /// prepaid SMS balance in segments (topped up by the super-admin)
+  smsCredits  Int       @default(0)
+  settings    Json?
   /// SSLCommerz store { storeId, storePassEnc, sandbox }; kept out of settings so it is never sent to the browser
-  gateway   Json?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  gateway     Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   memberships    Membership[]
   buildings      Building[]
@@ -279,6 +286,7 @@ model Organization {
   vehicles       Vehicle[]
   onlinePayments OnlinePayment[]
   bookings       Booking[]
+  creditEntries  SmsCreditEntry[]
 
   @@map("organizations")
 }
@@ -807,6 +815,8 @@ model Notification {
   lang      Lang                @default(BN)
   payload   Json
   body      String?             @db.Text
+  /// SMS segments charged when sent
+  segments  Int                 @default(0)
   status    NotificationStatus  @default(QUEUED)
   attempts  Int                 @default(0)
   lastError String?             @db.Text
@@ -1088,4 +1098,18 @@ model OnlinePayment {
 
   @@index([invoiceId])
   @@map("online_payments")
+}
+
+/// SMS credit top-ups and adjustments by the super-admin (usage is the SENT notifications' segments).
+model SmsCreditEntry {
+  id        BigInt       @id @default(autoincrement())
+  orgId     BigInt
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  delta     Int
+  reason    String       @db.VarChar(255)
+  byUserId  BigInt?
+  createdAt DateTime     @default(now())
+
+  @@index([orgId, createdAt])
+  @@map("sms_credit_entries")
 }

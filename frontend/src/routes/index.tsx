@@ -22,6 +22,7 @@ import PaymentListPage from "@/features/payments/PaymentListPage";
 import ExpenseListPage from "@/features/expenses/ExpenseListPage";
 import ReportsPage from "@/features/reports/ReportsPage";
 import { StaffPage } from "@/features/staff/StaffPage";
+import { AdminPage } from "@/features/admin/AdminPage";
 import { ReceiptViewPage } from "@/features/payments/ReceiptViewPage";
 import { PublicReceiptPage } from "@/features/payments/PublicReceiptPage";
 import { MessagesPage } from "@/features/notifications/MessagesPage";
@@ -74,6 +75,7 @@ export const AppRouter = () => {
           <Route path="repairs" element={<PortalRepairsPage />} />
         </Route>
 
+        <Route path="/admin" element={<ProtectedRoute roles={["SUPER_ADMIN"]}><AdminPage /></ProtectedRoute>} />
         <Route element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/buildings" element={<BuildingListPage />} />

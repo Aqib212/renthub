@@ -98,7 +98,7 @@ export async function rebuildVehicleInvoice(tx: Tx, invoiceId: bigint) {
  * ponytail: a fee waived by setting fine to 0 is charged again the next night; add a waived flag if owners hit it.
  */
 export async function applyLateFees(today = new Date()) {
-  const orgs = await prisma.organization.findMany({ select: { id: true, settings: true } });
+  const orgs = await prisma.organization.findMany({ where: { suspendedAt: null }, select: { id: true, settings: true } });
   let charged = 0;
   for (const org of orgs) {
     const s = settingsOf(org.settings).lateFee;
@@ -337,7 +337,7 @@ export class InvoiceService {
   }
 
   async generateAll(month: number, year: number) {
-    const orgs = await prisma.organization.findMany({ select: { id: true } });
+    const orgs = await prisma.organization.findMany({ where: { suspendedAt: null }, select: { id: true } });
     const results: { orgId: string; generated: number; total: number }[] = [];
     for (const org of orgs) {
       const { generated, total } = await this.generateForOrg(org.id, month, year);

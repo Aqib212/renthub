@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Box, Button, Card, CardContent, Chip, Grid, MenuItem, Stack, TextField, Typography, FormControlLabel, Switch } from "@mui/material";
+import { Box, Button, Card, CardContent, Chip, Grid, LinearProgress, MenuItem, Stack, TextField, Typography, FormControlLabel, Switch } from "@mui/material";
 import toast from "react-hot-toast";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { orgApi, type LateFee } from "@/api/org";
@@ -161,9 +161,25 @@ export const SettingsPage = () => {
             <GatewayCard />
             {org && <LateFeeCard fee={org.settings.lateFee ?? NO_FEE} />}
             <Card>
-              <CardContent>
-                <Typography variant="h6" sx={{ fontSize: 17, mb: 1 }}>Plan</Typography>
-                <Typography color="text.secondary">{org?.plan ?? "–"}</Typography>
+              <CardContent sx={{ display: "grid", gap: 1.25 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Typography variant="h6" sx={{ fontSize: 17 }}>Plan</Typography>
+                  {org?.planInfo && (
+                    <Chip size="small" label={org.planInfo.expired ? `${org.planInfo.name} (ended)` : org.planInfo.name}
+                      sx={org.planInfo.expired ? { bgcolor: CHIP.warning.bg, color: CHIP.warning.fg } : { bgcolor: CHIP.ok.bg, color: CHIP.ok.fg }} />
+                  )}
+                </Stack>
+                {org?.planInfo && (
+                  <>
+                    <Typography fontSize={14}>{org.planInfo.used} of {org.planInfo.limit} units and vehicles</Typography>
+                    <LinearProgress variant="determinate" value={Math.min(100, (org.planInfo.used / Math.max(1, org.planInfo.limit)) * 100)}
+                      color={org.planInfo.used >= org.planInfo.limit ? "error" : "primary"} sx={{ height: 8, borderRadius: 4 }} />
+                    <Typography fontSize={13} color="text.secondary">
+                      {org.planInfo.paidUntil ? `${org.planInfo.expired ? "Ended" : "Paid until"} ${new Date(org.planInfo.paidUntil).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}. ` : ""}
+                      SMS balance {org.smsCredits ?? 0} (sent this month: {org.smsUsedThisMonth ?? 0}). Contact RentHub to upgrade or top up.
+                    </Typography>
+                  </>
+                )}
               </CardContent>
             </Card>
           </Stack>

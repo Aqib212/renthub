@@ -14,6 +14,13 @@ interface AuthState {
   setAccessToken: (accessToken: string) => void;
   setUser: (user: User) => void;
   logout: () => void;
+  /**
+   * Super-admin "open as owner" (read-only). In memory only, never persisted: a reload ends it.
+   * While set, requests use its token and workspace, and the UI acts as that workspace's owner.
+   */
+  support: { orgId: string; orgName: string; accessToken: string } | null;
+  startSupport: (s: { orgId: string; orgName: string; accessToken: string }) => void;
+  endSupport: () => void;
 }
 
 /** Keep the chosen workspace if the user still belongs to it, else the first one. */
@@ -22,7 +29,17 @@ const pickOrg = (memberships: Membership[] | undefined, current: string | null) 
 
 /** The membership for the workspace in use (role drives what the UI shows). */
 export const useCurrentMembership = () =>
-  useAuthStore((s) => s.user?.memberships?.find((m) => m.orgId === s.currentOrgId) ?? s.user?.memberships?.[0] ?? null);
+  useAuthStore((s) =>
+    s.support
+      ? SUPPORT_MEMBERSHIP(s.support)
+      : s.user?.memberships?.find((m) => m.orgId === s.currentOrgId) ?? s.user?.memberships?.[0] ?? null);
+
+// one object per support session, so the selector above stays referentially stable
+let lastSupport: { key: string; m: Membership } | null = null;
+const SUPPORT_MEMBERSHIP = (s: { orgId: string; orgName: string }) => {
+  if (lastSupport?.key !== s.orgId) lastSupport = { key: s.orgId, m: { orgId: s.orgId, orgName: s.orgName, role: "OWNER" } };
+  return lastSupport.m;
+};
 
 export const useAuthStore = create<AuthState>()(
   persist(
@@ -33,6 +50,9 @@ export const useAuthStore = create<AuthState>()(
       currentOrgId: null,
 
       setCurrentOrg: (orgId) => set({ currentOrgId: orgId }),
+      support: null,
+      startSupport: (support) => set({ support }),
+      endSupport: () => set({ support: null }),
 
       setAuth: (user, tokens) =>
         set((s) => ({
@@ -50,6 +70,7 @@ export const useAuthStore = create<AuthState>()(
         set({
           user: null,
           accessToken: null,
+          support: null,
           isAuthenticated: false,
           currentOrgId: null,
         }),

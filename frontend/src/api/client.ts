@@ -9,11 +9,14 @@ const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  const { accessToken: token, currentOrgId } = useAuthStore.getState();
+  const { accessToken, currentOrgId, support } = useAuthStore.getState();
+  // support view: the super-admin's read-only token for that workspace
+  const token = support?.accessToken ?? accessToken;
+  const orgId = support?.orgId ?? currentOrgId;
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
-  if (currentOrgId) config.headers["X-Org-Id"] = currentOrgId;
+  if (orgId) config.headers["X-Org-Id"] = orgId;
   return config;
 });
 
@@ -43,6 +46,13 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    // support view: an expired support token, or the end of a read-only session -> back to the console
+    const st = useAuthStore.getState();
+    if (st.support && error.response?.status === 401) {
+      st.endSupport();
+      window.location.href = "/admin";
+      return Promise.reject(error);
+    }
     // a 401 from these means wrong credentials or no session, not an expired access token
     const isAuthCall = NO_REFRESH.includes(String(originalRequest?.url ?? ""));
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry && !isAuthCall) {

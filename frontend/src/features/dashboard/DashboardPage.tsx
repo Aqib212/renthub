@@ -2,6 +2,7 @@ import { Box, Grid, Card, CardContent, Typography, Table, TableHead, TableBody, 
 import { useNavigate } from "react-router-dom";
 import { ReceiptLongOutlined, EditCalendarOutlined, PrintOutlined } from "@mui/icons-material";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { AccountBanner } from "@/components/AccountBanner";
 import { formatBDT } from "@/utils/format";
 import { INVOICE_STATUS } from "@/theme";
 import {
@@ -77,6 +78,7 @@ export const DashboardPage = () => {
           </>
         }
       />
+      <AccountBanner />
       <PortalInbox />
       <FleetCards />
 

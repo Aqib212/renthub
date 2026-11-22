@@ -6,6 +6,8 @@ export interface User {
   lastName: string;
   /** Platform role. Business roles are per workspace, in memberships. */
   role: "SUPER_ADMIN" | "USER";
+  /** set by /auth/profile during a super-admin support view */
+  support?: boolean;
   status: "ACTIVE" | "INACTIVE" | "BLOCKED";
   emailVerified: boolean;
   avatar: string | null;

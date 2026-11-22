@@ -46,7 +46,8 @@ const verifySchema = z.object({ phone: phoneSchema, code: z.string().trim().rege
 /** Tenants this phone may see: matching phone, in orgs that have the portal on, with a real agreement. */
 async function tenantIdsFor(phone: string) {
   const rows = await prisma.tenant.findMany({
-    where: { phoneNormalized: phone, agreements: { some: { status: { not: "DRAFT" } } } },
+    // suspended landlords are left out: their tenants can still open bill and receipt links
+    where: { phoneNormalized: phone, agreements: { some: { status: { not: "DRAFT" } } }, org: { suspendedAt: null } },
     select: { id: true, lang: true, org: { select: { settings: true } } },
   });
   return rows.filter((r) => (r.org.settings as any)?.portal?.enabled !== false);

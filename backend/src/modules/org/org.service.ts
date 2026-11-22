@@ -8,6 +8,31 @@ import { toNumberId } from "../../shared/utils/helpers";
 import { permissionMatrix } from "../../shared/permissions";
 import type { InviteMemberInput, UpdateMemberInput, UpdateOrgInput } from "./org.validation";
 import { DEFAULT_LATE_FEE, type LateFeeSettings } from "../../shared/utils/lateFee";
+import { canAdd, limitFor } from "../../shared/plans";
+import { ValidationError } from "../../shared/utils/errors";
+
+/** Units + vehicles in the workspace. Raw SQL on purpose: the building-scope hook must not shrink the count. */
+export async function unitsUsed(orgId: number | bigint) {
+  const [r] = await prisma.$queryRaw<{ n: bigint }[]>`
+    SELECT (SELECT COUNT(*) FROM flats f JOIN floors fl ON fl.id = f.floorId JOIN buildings b ON b.id = fl.buildingId WHERE b.orgId = ${orgId})
+         + (SELECT COUNT(*) FROM vehicles v WHERE v.orgId = ${orgId}) AS n`;
+  return Number(r?.n ?? 0);
+}
+
+/** The plan as the owner sees it: name, limit in force, units used, paid-until, expired. */
+export async function planOf(org: { id: bigint; plan: string; unitLimit: number | null; paidUntil: Date | null }) {
+  const { limit, expired } = limitFor(org);
+  return { name: org.plan, limit, used: await unitsUsed(org.id), paidUntil: org.paidUntil, expired };
+}
+
+/** Refuse to add `n` units/vehicles beyond the plan. Nothing else is limited. */
+export async function assertRoom(orgId: number | bigint, n = 1) {
+  const org = await prisma.organization.findUniqueOrThrow({ where: { id: orgId }, select: { id: true, plan: true, unitLimit: true, paidUntil: true } });
+  const p = await planOf(org);
+  if (!canAdd(p.used, p.limit, n)) {
+    throw new ValidationError(`Your plan${p.expired ? " has expired and now" : ""} allows ${p.limit} units and vehicles; you have ${p.used}. Ask RentHub to upgrade.`);
+  }
+}
 
 export interface OrgSettings {
   dueDay: number;
@@ -44,7 +69,15 @@ export class OrgService {
     const org = await prisma.organization.findUnique({ where: { id: orgId } });
     if (!org) throw new NotFoundError("Organisation not found");
     const { gateway, ...rest } = org; // the payment gateway keys never go to the browser
-    return { ...rest, settings: settingsOf(org.settings), onlinePay: !!(gateway as { storeId?: string } | null)?.storeId };
+    const now = new Date();
+    const used = await prisma.notification.aggregate({ where: { orgId, status: "SENT", sentAt: { gte: new Date(now.getFullYear(), now.getMonth(), 1) } }, _sum: { segments: true } });
+    return {
+      ...rest,
+      settings: settingsOf(org.settings),
+      onlinePay: !!(gateway as { storeId?: string } | null)?.storeId,
+      planInfo: await planOf(org),
+      smsUsedThisMonth: used._sum.segments ?? 0,
+    };
   }
 
   async update(orgId: number, input: UpdateOrgInput) {
@@ -57,7 +90,7 @@ export class OrgService {
       },
     });
     const { gateway, ...rest } = org;
-    return { ...rest, settings: settingsOf(org.settings), onlinePay: !!(gateway as { storeId?: string } | null)?.storeId };
+    return { ...rest, settings: settingsOf(org.settings), onlinePay: !!(gateway as { storeId?: string } | null)?.storeId, planInfo: await planOf(org) };
   }
 
   async listMembers(orgId: number) {

@@ -466,4 +466,6 @@ export const bn: Partial<Record<MessageKey, string>> = {
   "pay.hint": "বিকাশ, নগদ, রকেট বা কার্ডে (SSLCommerz)। রসিদ SMS-এ আসবে।",
   "pay.failed": "পরিশোধ সম্পন্ন হয়নি। টাকা কাটা হয়নি; আবার চেষ্টা করুন।",
   "pay.cancelled": "আপনি পরিশোধ বাতিল করেছেন।",
+  "nav.platform": "RentHub অ্যাডমিন",
+  "msg.credits": "SMS ব্যালান্স: {left}টি বাকি। এ মাসে পাঠানো: {used}টি। প্রতিটি অংশে ১ ক্রেডিট (বাংলায় ৭০ অক্ষরে এক অংশ)।",
 };

@@ -8,6 +8,8 @@ export interface AuthRequest extends Request {
     userId: string;
     email: string;
     role: UserRole;
+    /** support view: the super-admin opened this workspace (read-only) */
+    support?: number;
   };
   /** Set by requireOrg (org.middleware.ts) on every business route. */
   org?: { id: number; membershipId: number; role: OrgRole; buildingIds: number[] | null };
@@ -30,6 +32,7 @@ export const authenticate = (req: AuthRequest, _res: Response, next: NextFunctio
       userId: decoded.userId,
       email: decoded.email,
       role: decoded.role as UserRole,
+      ...(decoded.sup && decoded.role === "SUPER_ADMIN" ? { support: Number(decoded.sup) } : {}),
     };
     next();
   } catch {

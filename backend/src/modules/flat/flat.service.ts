@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { assertRoom } from "../org/org.service";
 import { prisma } from "../../shared/prisma";
 import { NotFoundError, ValidationError } from "../../shared/utils/errors";
 import { toNumberId } from "../../shared/utils/helpers";
@@ -36,6 +37,7 @@ export class FlatService {
       where: { id: toNumberId(floorId), building: { orgId: toNumberId(orgId) } },
     });
     if (!floor) throw new NotFoundError("Floor not found");
+    await assertRoom(toNumberId(orgId));
     if (input.status === "OCCUPIED" || input.status === "NOTICE") input.status = "VACANT"; // set by agreements
 
     // every unit is an Asset, so agreements and invoices can point at it

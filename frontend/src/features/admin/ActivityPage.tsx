@@ -20,6 +20,8 @@ const FILTERS: { value: string; label: string }[] = [
   { value: "notice", label: "Move-out requests" },
   { value: "jama", label: "Jama off days" },
   { value: "booking", label: "Bookings" },
+  { value: "admin", label: "RentHub account" },
+  { value: "support", label: "Support visits" },
 ];
 
 /** Plain-English line for an audit row; the raw metadata is shown beside it. */
@@ -59,6 +61,11 @@ const describe = (r: AuditRow) => {
     case "booking.start": return `${m.vehicle} left on a trip (${m.startKm} km)`;
     case "booking.close": return `${m.vehicle} back from a trip${m.km != null ? ` (${m.km} km)` : ""}`;
     case "booking.cancel": return `Cancelled the booking of ${m.vehicle}${m.charge ? `, charge ${tk(m.charge)}` : ""}`;
+    case "support.open": return "RentHub support opened this workspace (read-only)";
+    case "admin.plan": return `RentHub changed the plan: ${Object.entries(m.after ?? {}).map(([k, v]) => `${k} ${v ?? "none"}`).join(", ")}`;
+    case "admin.credits": return `RentHub ${Number(m.amount) > 0 ? "added" : "removed"} ${Math.abs(Number(m.amount))} SMS credits (${m.reason})`;
+    case "admin.suspend": return "RentHub suspended this workspace";
+    case "admin.reactivate": return "RentHub reactivated this workspace";
     case "jama.day_clear": return `${m.vehicle ?? "Vehicle"} ${m.date}: back to normal jama`;
     default:
       if (r.action.startsWith("maintenance.")) return `Maintenance: ${m.title ?? ""} ${r.action.split(".")[1]}${m.cost ? ` (${tk(m.cost)})` : ""}`;

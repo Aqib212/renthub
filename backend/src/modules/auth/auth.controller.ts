@@ -6,6 +6,7 @@ import type { AuthRequest } from "../../middleware/auth.middleware";
 import { env } from "../../config/env";
 import { STAFF_RT, clearRefreshCookie, durationMs, readCookie, setRefreshCookie } from "../../shared/utils/cookies";
 import { UnauthorizedError } from "../../shared/utils/errors";
+import { prisma } from "../../shared/prisma";
 
 /** Puts the refresh token in the httpOnly cookie and leaves only the access token in the body. */
 const withCookie = <T extends { tokens: { accessToken: string; refreshToken: string } }>(res: Response, r: T) => {
@@ -103,6 +104,12 @@ export const resendOtp = asyncHandler(async (req, res: Response) => {
 
 export const getProfile = asyncHandler(async (req: AuthRequest, res: Response) => {
   const user = await authService.getProfile(req.user!.userId);
+  // support view: the super-admin sees the opened workspace as if they were its owner (read-only)
+  if (req.user!.support) {
+    const org = await prisma.organization.findUnique({ where: { id: req.user!.support }, select: { name: true } });
+    (user as any).memberships = org ? [{ orgId: String(req.user!.support), orgName: org.name, role: "OWNER", limited: false }] : [];
+    (user as any).support = true;
+  }
   sendSuccess(res, {
     statusCode: 200,
     message: "Profile retrieved successfully",

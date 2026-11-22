@@ -11,6 +11,8 @@ async function main() {
 
   // Clean existing data in dependency order
   await prisma.dayEntry.deleteMany();
+  await prisma.smsCreditEntry.deleteMany();
+  await prisma.onlinePayment.deleteMany();
   await prisma.booking.deleteMany();
   await prisma.portalSession.deleteMany();
   await prisma.portalOtp.deleteMany();
@@ -74,8 +76,12 @@ async function main() {
 
   // Workspaces: each owner runs one organisation; org 1 also has staff (phase 1).
   const settings = { dueDay: 10, noticeMonths: 2 };
-  const org = await prisma.organization.create({ data: { name: "Hasan Properties", settings } });
-  const org2 = await prisma.organization.create({ data: { name: "Ahmed Residences", settings } });
+  // phase 9: both demo workspaces on PRO for a year with SMS credits, so nothing in the demo is blocked
+  const paid = { plan: "PRO", paidUntil: new Date(Date.now() + 365 * 86_400_000), smsCredits: 5000 };
+  const org = await prisma.organization.create({ data: { name: "Hasan Properties", settings, ...paid } });
+  const org2 = await prisma.organization.create({ data: { name: "Ahmed Residences", settings, ...paid } });
+  // the platform super-admin (no workspace of its own)
+  await prisma.user.create({ data: { email: "admin@demo.com", password, firstName: "RentHub", lastName: "Admin", status: "ACTIVE", emailVerified: true, role: "SUPER_ADMIN" } });
   const staff = (email: string, firstName: string, lastName: string) =>
     prisma.user.create({ data: { email, password, firstName, lastName, status: "ACTIVE", emailVerified: true } });
   const manager = await staff("manager@demo.com", "Selina", "Akter");
@@ -544,6 +550,7 @@ async function main() {
   console.log(`   Demo owner login: owner@demo.com / Test1234`);
   console.log(`   Demo owner2 login: owner2@demo.com / Test1234`);
   console.log(`   Staff in org 1: manager@demo.com, caretaker@demo.com, block@demo.com (one building) / Test1234`);
+  console.log(`   Super-admin: admin@demo.com / Test1234`);
 
   console.log("\n📌 Summary for Dashboard:");
   console.log("   Total Buildings: 2");

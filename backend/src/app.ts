@@ -28,6 +28,7 @@ import portalRoutes from "./modules/portal/portal.routes";
 import vehicleRoutes, { jamaRouter } from "./modules/vehicle/vehicle.routes";
 import bookingRoutes from "./modules/booking/booking.routes";
 import { gatewayRouter, publicPayRouter } from "./modules/online-pay/online-pay.routes";
+import adminRoutes from "./modules/admin/admin.routes";
 import { startScheduledTasks } from "./scheduledTasks";
 
 const app = express();
@@ -39,6 +40,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(morgan(env.nodeEnv === "development" ? "dev" : "combined"));
 
 app.use("/api/v1/auth", authRoutes);
+app.use("/api/v1/admin", adminRoutes);
 app.use("/api/v1/orgs/current/gateway", gatewayRouter);
 app.use("/api/v1/orgs", orgRoutes);
 app.use("/api/v1/agreements", agreementRoutes);

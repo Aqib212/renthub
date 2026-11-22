@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Drawer, List, ListItemButton, ListItemIcon, ListItemText, Box, Typography, ButtonBase, Menu, MenuItem } from "@mui/material";
 import {
+  AdminPanelSettingsOutlined,
   SpaceDashboardOutlined,
   BusinessOutlined,
   LayersOutlined,
@@ -139,7 +140,9 @@ const SidebarContent = ({ onNavigate }: { onNavigate?: () => void }) => {
   const navigate = useNavigate();
   const membership = useCurrentMembership();
   const role = membership?.role;
-  const visible = groups
+  const superAdmin = useAuthStore((s) => s.user?.role === "SUPER_ADMIN" && !s.support);
+  const platform: typeof groups = superAdmin ? [{ label: "nav.platform", items: [{ label: "nav.platform", icon: <AdminPanelSettingsOutlined />, path: "/admin" }] }] : [];
+  const visible = [...groups, ...platform]
     // staff limited to some buildings see no vehicles (the API hides them too)
     .filter((g) => !(membership?.limited && g.label === "nav.fleet"))
     .map((g) => ({ ...g, items: g.items.filter((i) => !i.roles || (role && i.roles.includes(role))) }))

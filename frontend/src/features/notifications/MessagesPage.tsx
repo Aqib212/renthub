@@ -45,6 +45,11 @@ export const MessagesPage = () => {
   return (
     <Box>
       <PageHeader title={t("msg.title")} subtitle={t("msg.subtitle")} />
+      {org && (
+        <Alert severity={(org.smsCredits ?? 0) <= 0 ? "error" : (org.smsCredits ?? 0) < 50 ? "warning" : "success"} sx={{ mb: 1.5 }}>
+          {t("msg.credits", { left: org.smsCredits ?? 0, used: org.smsUsedThisMonth ?? 0 })}
+        </Alert>
+      )}
       <Alert severity="info" sx={{ mb: 2.5 }}>{t("msg.consoleNote")}</Alert>
 
       <Grid container spacing={2.5}>

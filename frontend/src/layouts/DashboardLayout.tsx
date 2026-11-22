@@ -1,5 +1,5 @@
-import { Outlet } from "react-router-dom";
-import { Box, AppBar, Toolbar, Typography, IconButton, Avatar, Menu, MenuItem, Tooltip, ToggleButton, ToggleButtonGroup } from "@mui/material";
+import { Navigate, Outlet } from "react-router-dom";
+import { Alert, Box, AppBar, Button, Toolbar, Typography, IconButton, Avatar, Menu, MenuItem, Tooltip, ToggleButton, ToggleButtonGroup } from "@mui/material";
 import { useT, useUiStore } from "@/i18n";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -8,9 +8,11 @@ import { authApi } from "@/api/client";
 import { Sidebar } from "./Sidebar";
 import { Menu as MenuIcon } from "@mui/icons-material";
 import toast from "react-hot-toast";
+import { useQueryClient } from "@tanstack/react-query";
 
 export const DashboardLayout = () => {
-  const { user, logout, setUser } = useAuthStore();
+  const { user, logout, setUser, support, endSupport } = useAuthStore();
+  const qc = useQueryClient();
   const { t, lang } = useT();
   const setLang = useUiStore((s) => s.setLang);
   const navigate = useNavigate();
@@ -19,8 +21,9 @@ export const DashboardLayout = () => {
 
   // refresh workspace memberships once per load (sessions saved before phase 1 have none)
   useEffect(() => {
+    if (support) return; // the support view must not overwrite the super-admin's own profile
     authApi.getProfile().then((r) => setUser(r.data.data)).catch(() => {});
-  }, [setUser]);
+  }, [setUser, support]);
 
   const handleMenu = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -40,6 +43,9 @@ export const DashboardLayout = () => {
     toast.success("Logged out");
     navigate("/login");
   };
+
+  // the platform super-admin has no workspace of their own: the console is home
+  if (user?.role === "SUPER_ADMIN" && !support && !user.memberships?.length) return <Navigate to="/admin" replace />;
 
   return (
     <Box sx={{ display: "flex", minHeight: "100vh" }}>
@@ -91,6 +97,15 @@ export const DashboardLayout = () => {
             </Menu>
           </Toolbar>
         </AppBar>
+        {support && (
+          <Alert
+            severity="warning" variant="filled" square
+            sx={{ position: "sticky", top: 64, zIndex: 2, displayPrint: "none", "& .MuiAlert-message": { flexGrow: 1 } }}
+            action={<Button color="inherit" size="small" onClick={() => { endSupport(); qc.clear(); navigate("/admin"); }}>Exit</Button>}
+          >
+            Support view of <b>{support.orgName}</b>: read-only, logged in the owner&apos;s Activity.
+          </Alert>
+        )}
 
         <Box sx={{ flexGrow: 1, p: { xs: 2, md: 3.5 }, bgcolor: "background.default", maxWidth: 1440, width: "100%", mx: "auto" }}>
           <Outlet />

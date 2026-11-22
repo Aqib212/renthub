@@ -23,6 +23,11 @@ export interface Organization {
   myRole: OrgRole;
   /** the workspace has an SSLCommerz store set up */
   onlinePay?: boolean;
+  /** units + vehicles allowed by the plan in force (an expired paid plan falls back to FREE) */
+  planInfo?: { name: string; limit: number; used: number; paidUntil: string | null; expired: boolean };
+  /** prepaid SMS balance (segments) and how many were sent this month */
+  smsCredits?: number;
+  smsUsedThisMonth?: number;
 }
 
 export interface Member {

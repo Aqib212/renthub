@@ -10,6 +10,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "tsx prisma/seed.ts",
+    "make-superadmin": "tsx prisma/make-superadmin.ts",
     "prisma:reset": "prisma migrate reset --force"
   },
   "dependencies": {

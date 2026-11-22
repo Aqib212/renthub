@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { assertRoom } from "../org/org.service";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../shared/prisma";
 import { audit } from "../../shared/audit";
@@ -98,6 +99,7 @@ export class VehicleService {
   }
 
   async create(orgId: number, input: VehicleInput) {
+    await assertRoom(orgId);
     const v = await this.unique(() =>
       prisma.vehicle.create({
         data: { ...input, regNo: input.regNo.toUpperCase(), org: { connect: { id: orgId } }, asset: { create: { orgId, kind: "VEHICLE" } } },

@@ -470,6 +470,8 @@ export const en = {
   "pay.hint": "bKash, Nagad, Rocket or card, through SSLCommerz. The receipt comes by SMS.",
   "pay.failed": "The payment did not go through. No money was taken; you can try again.",
   "pay.cancelled": "You cancelled the payment.",
+  "nav.platform": "RentHub admin",
+  "msg.credits": "SMS balance: {left} left. Sent this month: {used}. Each SMS uses 1 credit per part (Bangla: 70 characters a part).",
 } as const;
 
 export type MessageKey = keyof typeof en;

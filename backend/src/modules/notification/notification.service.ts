@@ -66,27 +66,42 @@ export async function drain(limit = 50) {
     where: { status: "QUEUED", sendAfter: { lte: new Date() } },
     orderBy: { sendAfter: "asc" },
     take: limit,
-    include: { org: { select: { settings: true } } },
+    include: { org: { select: { settings: true, suspendedAt: true } } },
   });
   let sent = 0;
   for (const n of due) {
+    if (n.org.suspendedAt) {
+      await prisma.notification.update({ where: { id: n.id }, data: { status: "SKIPPED", lastError: "This workspace is suspended" } });
+      continue;
+    }
     if (!settingsOf(n.org.settings).sms.enabled) {
       await prisma.notification.update({ where: { id: n.id }, data: { status: "SKIPPED", lastError: "SMS is turned off for this organisation" } });
       continue;
     }
-    const r = await sendSms(n.to!, n.body ?? render(n.template as TemplateKey, n.lang, n.payload as any));
+    const text = n.body ?? render(n.template as TemplateKey, n.lang, n.payload as any);
+    // prepaid credits: take the segments first (atomic), give them back if the gateway fails
+    const segments = smsSegments(text);
+    const { count: paid } = await prisma.organization.updateMany({ where: { id: n.orgId, smsCredits: { gte: segments } }, data: { smsCredits: { decrement: segments } } });
+    if (!paid) {
+      await prisma.notification.update({ where: { id: n.id }, data: { status: "SKIPPED", lastError: "Out of SMS credit: ask RentHub for a top-up" } });
+      continue;
+    }
+    const r = await sendSms(n.to!, text);
     const attempts = n.attempts + 1;
-    await prisma.notification.update({
-      where: { id: n.id },
-      data: r.ok
-        ? { status: "SENT", sentAt: new Date(), attempts, lastError: null }
-        : {
-            attempts,
-            lastError: r.error,
-            status: attempts >= MAX_ATTEMPTS ? "FAILED" : "QUEUED",
-            sendAfter: new Date(Date.now() + (BACKOFF_MIN[attempts - 1] ?? 0) * 60_000),
-          },
-    });
+    await prisma.$transaction([
+      prisma.notification.update({
+        where: { id: n.id },
+        data: r.ok
+          ? { status: "SENT", sentAt: new Date(), attempts, lastError: null, segments }
+          : {
+              attempts,
+              lastError: r.error,
+              status: attempts >= MAX_ATTEMPTS ? "FAILED" : "QUEUED",
+              sendAfter: new Date(Date.now() + (BACKOFF_MIN[attempts - 1] ?? 0) * 60_000),
+            },
+      }),
+      ...(r.ok ? [] : [prisma.organization.update({ where: { id: n.orgId }, data: { smsCredits: { increment: segments } } })]),
+    ]);
     if (r.ok) sent++;
   }
   return { picked: due.length, sent };
@@ -128,7 +143,7 @@ async function queueReminder(inv: ReminderInvoice, template: Exclude<TemplateKey
 
 /** Daily: queue the reminder each open invoice is due for today (5th, due day, 3 days late). */
 export async function queueDailyReminders(today = new Date()) {
-  const orgs = await prisma.organization.findMany({ select: { id: true, settings: true } });
+  const orgs = await prisma.organization.findMany({ where: { suspendedAt: null }, select: { id: true, settings: true } });
   let queued = 0;
   for (const org of orgs) {
     const s = settingsOf(org.settings);
@@ -159,6 +174,7 @@ export async function queueDailyReminders(today = new Date()) {
 /** Daily: SMS the workspace owner about documents expiring in 30 days, in 7 days, or today. */
 export async function queueExpiryReminders(today: Date) {
   const orgs = await prisma.organization.findMany({
+    where: { suspendedAt: null },
     select: {
       id: true, name: true, settings: true,
       memberships: { where: { role: "OWNER", isActive: true }, take: 1, orderBy: { createdAt: "asc" }, select: { user: { select: { phone: true } } } },
@@ -227,5 +243,35 @@ export class NotificationService {
     if (inv.carriedForward || Number(inv.dueAmount) <= 0) throw new ValidationError("Nothing is due on this invoice");
     await queueReminder(inv, inv.status === "OVERDUE" ? "OVERDUE" : "RENT_DUE");
     return { queued: true, to: normalizeBdPhone(inv.tenant?.phone) };
+  }
+
+  /** WhatsApp: the text the reminder SMS would carry, for a wa.me link (free, sent by staff from their phone). */
+  async invoiceShareText(orgId: number, invoiceId: string) {
+    const inv = await prisma.invoice.findFirst({ where: { id: toNumberId(invoiceId), orgId }, include: invoiceForReminder });
+    if (!inv) throw new NotFoundError("Invoice not found");
+    const lang = inv.tenant?.lang ?? "BN";
+    const text = render(inv.status === "OVERDUE" ? "OVERDUE" : "RENT_DUE", lang, {
+      org: inv.org.name,
+      unit: unitPlace(inv),
+      amount: Number(inv.dueAmount),
+      month: `${inv.year}-${String(inv.month).padStart(2, "0")}`,
+      dueDate: inv.dueDate ? ymd(inv.dueDate) : ymd(new Date()),
+      link: await shareLink(inv),
+    });
+    return { phone: normalizeBdPhone(inv.tenant?.phone), text };
+  }
+
+  /** WhatsApp: the receipt SMS text with the public receipt link. */
+  async paymentShareText(orgId: number, paymentId: string) {
+    const p = await prisma.payment.findFirst({ where: { id: toNumberId(paymentId), orgId }, include: { invoice: { include: invoiceForReminder } } });
+    if (!p) throw new NotFoundError("Payment not found");
+    if (!p.receiptNo) throw new ValidationError("This payment has no receipt");
+    const token = p.shareToken ?? crypto.randomBytes(24).toString("base64url");
+    if (!p.shareToken) await prisma.payment.update({ where: { id: p.id }, data: { shareToken: token } });
+    const inv = p.invoice;
+    const text = render("RECEIPT", inv.tenant?.lang ?? "BN", {
+      org: inv.org.name, unit: unitPlace(inv), amount: Number(p.amount), receiptNo: p.receiptNo, balance: Number(inv.dueAmount), link: `${env.appUrl}/r/${token}`,
+    });
+    return { phone: normalizeBdPhone(inv.tenant?.phone), text };
   }
 }
