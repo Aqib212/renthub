@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { Prisma } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { audit } from "../../shared/audit";
 import { prisma } from "../../shared/prisma";
@@ -6,6 +7,32 @@ import { ConflictError, ForbiddenError, NotFoundError } from "../../shared/utils
 import { toNumberId } from "../../shared/utils/helpers";
 import { permissionMatrix } from "../../shared/permissions";
 import type { InviteMemberInput, UpdateMemberInput, UpdateOrgInput } from "./org.validation";
+import { DEFAULT_LATE_FEE, type LateFeeSettings } from "../../shared/utils/lateFee";
+import { canAdd, limitFor } from "../../shared/plans";
+import { ValidationError } from "../../shared/utils/errors";
+
+/** Units + vehicles in the workspace. Raw SQL on purpose: the building-scope hook must not shrink the count. */
+export async function unitsUsed(orgId: number | bigint) {
+  const [r] = await prisma.$queryRaw<{ n: bigint }[]>`
+    SELECT (SELECT COUNT(*) FROM flats f JOIN floors fl ON fl.id = f.floorId JOIN buildings b ON b.id = fl.buildingId WHERE b.orgId = ${orgId})
+         + (SELECT COUNT(*) FROM vehicles v WHERE v.orgId = ${orgId}) AS n`;
+  return Number(r?.n ?? 0);
+}
+
+/** The plan as the owner sees it: name, limit in force, units used, paid-until, expired. */
+export async function planOf(org: { id: bigint; plan: string; unitLimit: number | null; paidUntil: Date | null }) {
+  const { limit, expired } = limitFor(org);
+  return { name: org.plan, limit, used: await unitsUsed(org.id), paidUntil: org.paidUntil, expired };
+}
+
+/** Refuse to add `n` units/vehicles beyond the plan. Nothing else is limited. */
+export async function assertRoom(orgId: number | bigint, n = 1) {
+  const org = await prisma.organization.findUniqueOrThrow({ where: { id: orgId }, select: { id: true, plan: true, unitLimit: true, paidUntil: true } });
+  const p = await planOf(org);
+  if (!canAdd(p.used, p.limit, n)) {
+    throw new ValidationError(`Your plan${p.expired ? " has expired and now" : ""} allows ${p.limit} units and vehicles; you have ${p.used}. Ask RentHub to upgrade.`);
+  }
+}
 
 export interface OrgSettings {
   dueDay: number;
@@ -18,18 +45,21 @@ export interface OrgSettings {
   portal: { enabled: boolean };
   /** how tenants pay (bKash number, bank account); shown in the portal */
   payInfo: string;
+  /** added once to a monthly rent invoice `afterDays` after its due date (off by default) */
+  lateFee: LateFeeSettings;
 }
-export const DEFAULT_SETTINGS: OrgSettings = { dueDay: 10, noticeMonths: 2, sms: { enabled: true, reminders: true }, agreementClauses: [], portal: { enabled: true }, payInfo: "" };
+export const DEFAULT_SETTINGS: OrgSettings = { dueDay: 10, noticeMonths: 2, sms: { enabled: true, reminders: true }, agreementClauses: [], portal: { enabled: true }, payInfo: "", lateFee: DEFAULT_LATE_FEE };
 
 export const settingsOf = (raw: unknown): OrgSettings => {
   const r = (raw as Partial<OrgSettings>) ?? {};
-  return { ...DEFAULT_SETTINGS, ...r, sms: { ...DEFAULT_SETTINGS.sms, ...(r.sms ?? {}) }, portal: { ...DEFAULT_SETTINGS.portal, ...(r.portal ?? {}) } };
+  return { ...DEFAULT_SETTINGS, ...r, sms: { ...DEFAULT_SETTINGS.sms, ...(r.sms ?? {}) }, portal: { ...DEFAULT_SETTINGS.portal, ...(r.portal ?? {}) }, lateFee: { ...DEFAULT_SETTINGS.lateFee, ...(r.lateFee ?? {}) } };
 };
 
 const memberSelect = {
   id: true,
   role: true,
   isActive: true,
+  buildingIds: true,
   createdAt: true,
   user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true, lastLoginAt: true } },
 } as const;
@@ -38,7 +68,16 @@ export class OrgService {
   async getCurrent(orgId: number) {
     const org = await prisma.organization.findUnique({ where: { id: orgId } });
     if (!org) throw new NotFoundError("Organisation not found");
-    return { ...org, settings: settingsOf(org.settings) };
+    const { gateway, ...rest } = org; // the payment gateway keys never go to the browser
+    const now = new Date();
+    const used = await prisma.notification.aggregate({ where: { orgId, status: "SENT", sentAt: { gte: new Date(now.getFullYear(), now.getMonth(), 1) } }, _sum: { segments: true } });
+    return {
+      ...rest,
+      settings: settingsOf(org.settings),
+      onlinePay: !!(gateway as { storeId?: string } | null)?.storeId,
+      planInfo: await planOf(org),
+      smsUsedThisMonth: used._sum.segments ?? 0,
+    };
   }
 
   async update(orgId: number, input: UpdateOrgInput) {
@@ -47,10 +86,11 @@ export class OrgService {
       where: { id: orgId },
       data: {
         ...(input.name && { name: input.name }),
-        ...(input.settings && { settings: { ...current.settings, ...input.settings, sms: { ...current.settings.sms, ...(input.settings.sms ?? {}) }, portal: { ...current.settings.portal, ...(input.settings.portal ?? {}) } } }),
+        ...(input.settings && { settings: { ...current.settings, ...input.settings, sms: { ...current.settings.sms, ...(input.settings.sms ?? {}) }, portal: { ...current.settings.portal, ...(input.settings.portal ?? {}) }, lateFee: { ...current.settings.lateFee, ...(input.settings.lateFee ?? {}) } } }),
       },
     });
-    return { ...org, settings: settingsOf(org.settings) };
+    const { gateway, ...rest } = org;
+    return { ...rest, settings: settingsOf(org.settings), onlinePay: !!(gateway as { storeId?: string } | null)?.storeId, planInfo: await planOf(org) };
   }
 
   async listMembers(orgId: number) {
@@ -84,7 +124,7 @@ export class OrgService {
     const existing = await prisma.membership.findUnique({ where: { userId_orgId: { userId: user.id, orgId } } });
     if (existing) throw new ConflictError("This person is already a member");
 
-    const m = await prisma.membership.create({ data: { userId: user.id, orgId, role: input.role }, select: memberSelect });
+    const m = await prisma.membership.create({ data: { userId: user.id, orgId, role: input.role, buildingIds: await this.buildingsJson(orgId, input.buildingIds) }, select: memberSelect });
     await audit(prisma, "member.add", "Membership", m.id, { email: input.email, role: input.role });
     return m;
   }
@@ -92,8 +132,13 @@ export class OrgService {
   async updateMember(orgId: number, memberId: string, input: UpdateMemberInput) {
     const m = await this.ownMember(orgId, memberId);
     if (m.role === "OWNER") throw new ForbiddenError("The owner's role can't be changed here");
-    const updated = await prisma.membership.update({ where: { id: m.id }, data: input, select: memberSelect });
-    await audit(prisma, "member.update", "Membership", m.id, { before: { role: m.role, isActive: m.isActive }, after: input });
+    const { buildingIds, ...rest } = input;
+    const updated = await prisma.membership.update({
+      where: { id: m.id },
+      data: { ...rest, ...(buildingIds !== undefined ? { buildingIds: await this.buildingsJson(orgId, buildingIds) } : {}) },
+      select: memberSelect,
+    });
+    await audit(prisma, "member.update", "Membership", m.id, { before: { role: m.role, isActive: m.isActive, buildingIds: m.buildingIds as any }, after: input as any });
     return updated;
   }
 
@@ -102,6 +147,14 @@ export class OrgService {
     if (m.role === "OWNER") throw new ForbiddenError("The owner can't be removed");
     await prisma.membership.delete({ where: { id: m.id } });
     await audit(prisma, "member.remove", "Membership", m.id, { role: m.role, userId: Number(m.userId) });
+  }
+
+  /** Which buildings a member may see: null = all; otherwise ids that must belong to this workspace. */
+  private async buildingsJson(orgId: number, ids: number[] | null | undefined) {
+    if (!ids || !ids.length) return Prisma.DbNull;
+    const found = await prisma.building.count({ where: { orgId, id: { in: ids } } });
+    if (found !== new Set(ids).size) throw new NotFoundError("Building not found");
+    return [...new Set(ids)];
   }
 
   private async ownMember(orgId: number, memberId: string) {

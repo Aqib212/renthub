@@ -20,6 +20,9 @@ router.post("/generate", invoiceController.generateInvoices);
 router.post("/generate-for-flat", invoiceController.generateForFlat);
 router.patch("/:id", invoiceController.update);
 router.post("/:id/share", invoiceController.share);
+router.get("/:id/share-text", asyncHandler(async (req: AuthRequest, res: Response) => {
+  sendResult(res, await new NotificationService().invoiceShareText(req.org!.id, req.params.id));
+}));
 router.post("/:id/remind", asyncHandler(async (req: AuthRequest, res: Response) => {
   sendResult(res, await new NotificationService().remindInvoice(req.org!.id, req.params.id));
 }));

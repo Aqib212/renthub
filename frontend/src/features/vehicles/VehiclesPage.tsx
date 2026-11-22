@@ -14,7 +14,7 @@ import { useT, type MessageKey } from "@/i18n";
 import { apiError, formatBDT, formatDate } from "@/utils/format";
 import { CHIP } from "@/theme";
 
-export const STATUS_CHIP: Record<VehicleStatus, { bg: string; fg: string }> = { AVAILABLE: CHIP.info, ON_LEASE: CHIP.ok, OFF_ROAD: CHIP.warning };
+export const STATUS_CHIP: Record<VehicleStatus, { bg: string; fg: string }> = { AVAILABLE: CHIP.info, ON_LEASE: CHIP.ok, OFF_ROAD: CHIP.warning, ON_TRIP: CHIP.ok };
 const daysUntil = (d: string) => Math.ceil((new Date(d).getTime() - Date.now()) / 86_400_000);
 
 /** Add / edit a vehicle. Used by the list and the detail page. */

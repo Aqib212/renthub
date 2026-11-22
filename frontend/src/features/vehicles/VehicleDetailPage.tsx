@@ -2,11 +2,13 @@ import { useState } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Box, Button, Card, CardContent, Chip, Grid, Link, Stack, Typography } from "@mui/material";
-import { DeleteOutline, EditOutlined, HandshakeOutlined, BuildOutlined } from "@mui/icons-material";
+import { DeleteOutline, EditOutlined, EventNoteOutlined, HandshakeOutlined, BuildOutlined } from "@mui/icons-material";
 import toast from "react-hot-toast";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { DocumentsCard } from "@/components/DocumentsCard";
 import { vehicleApi } from "@/api/vehicles";
+import { bookingApi } from "@/api/bookings";
+import { BOOKING_CHIP, BookingDialog, formatWhen } from "@/features/bookings/BookingsPage";
 import { useCurrentMembership } from "@/store/authStore";
 import { useT, type MessageKey } from "@/i18n";
 import { apiError, formatBDT, formatDate } from "@/utils/format";
@@ -19,6 +21,8 @@ export const VehicleDetailPage = () => {
   const role = useCurrentMembership()?.role;
   const canWrite = role === "OWNER" || role === "MANAGER";
   const [edit, setEdit] = useState(false);
+  const [book, setBook] = useState(false);
+  const { data: bookings = [] } = useQuery({ queryKey: ["bookings", "vehicle", id], queryFn: () => bookingApi.list({ vehicleId: Number(id) }) });
   const { data: v } = useQuery({ queryKey: ["vehicle", id], queryFn: () => vehicleApi.get(id!) });
   const remove = useMutation({
     mutationFn: () => vehicleApi.remove(v!.id),
@@ -44,6 +48,7 @@ export const VehicleDetailPage = () => {
             {!v.agreement && v.status === "AVAILABLE" && (
               <Button variant="contained" startIcon={<HandshakeOutlined />} onClick={() => navigate(`/agreements/new?vehicleId=${v.id}`)}>{t("veh.lease")}</Button>
             )}
+            {!v.agreement && v.status !== "OFF_ROAD" && <Button variant="outlined" startIcon={<EventNoteOutlined />} onClick={() => setBook(true)}>{t("book.book")}</Button>}
             <Button variant="outlined" startIcon={<EditOutlined />} onClick={() => setEdit(true)}>{t("veh.edit")}</Button>
             {!v.agreements.length && <Button color="error" startIcon={<DeleteOutline />} onClick={() => window.confirm(t("veh.confirmDelete")) && remove.mutate()}>{t("veh.delete")}</Button>}
           </Stack>
@@ -83,10 +88,30 @@ export const VehicleDetailPage = () => {
           </Stack>
         </Grid>
         <Grid item xs={12} md={6}>
-          <DocumentsCard link={{ assetId: v.assetId }} defaultKind="FITNESS" />
+          <Stack spacing={2.5}>
+            <DocumentsCard link={{ assetId: v.assetId }} defaultKind="FITNESS" />
+            {(bookings.length > 0 || v.type === "CAR" || v.type === "MICROBUS") && (
+              <Card>
+                <CardContent>
+                  <Typography variant="h6" fontSize={17} sx={{ mb: 1 }}>{t("book.vehicleBookings")}</Typography>
+                  {!bookings.length && <Typography color="text.secondary" fontSize={14}>{t("book.noBookings")}</Typography>}
+                  {[...bookings].reverse().slice(0, 10).map((b) => (
+                    <Stack key={b.id} direction="row" justifyContent="space-between" alignItems="center" gap={1} sx={{ py: 0.75, borderBottom: 1, borderColor: "divider" }}>
+                      <Box sx={{ minWidth: 0 }}>
+                        <Link component={RouterLink} to={`/bookings/${b.id}`} fontSize={14}>{b.customer}</Link>
+                        <Typography fontSize={12} color="text.secondary">{formatWhen(b.startAt, lang)} – {formatWhen(b.endAt, lang)}</Typography>
+                      </Box>
+                      <Chip size="small" label={t(`book.status.${b.status}` as MessageKey)} sx={{ bgcolor: BOOKING_CHIP[b.status].bg, color: BOOKING_CHIP[b.status].fg }} />
+                    </Stack>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+          </Stack>
         </Grid>
       </Grid>
       <VehicleDialog open={edit} onClose={() => setEdit(false)} vehicle={v} />
+      <BookingDialog open={book} onClose={() => setBook(false)} preset={{ vehicleId: v.id }} />
     </Box>
   );
 };

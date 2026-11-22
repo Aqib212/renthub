@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Drawer, List, ListItemButton, ListItemIcon, ListItemText, Box, Typography, ButtonBase, Menu, MenuItem } from "@mui/material";
 import {
+  AdminPanelSettingsOutlined,
   SpaceDashboardOutlined,
   BusinessOutlined,
   LayersOutlined,
@@ -16,7 +17,7 @@ import {
   EditCalendarOutlined,
   BadgeOutlined,
   GridViewOutlined,
-  HandshakeOutlined, BuildOutlined, HistoryOutlined, LocalTaxiOutlined, TodayOutlined,
+  HandshakeOutlined, BuildOutlined, HistoryOutlined, LocalTaxiOutlined, TodayOutlined, EventNoteOutlined,
   SettingsOutlined,
   SavingsOutlined,
   SmsOutlined,
@@ -52,6 +53,7 @@ const groups: { label: MessageKey; items: NavItem[] }[] = [
     items: [
       { label: "nav.vehicles", icon: <LocalTaxiOutlined />, path: "/vehicles" },
       { label: "nav.jama", icon: <TodayOutlined />, path: "/jama" },
+      { label: "nav.bookings", icon: <EventNoteOutlined />, path: "/bookings" },
     ],
   },
   {
@@ -136,8 +138,13 @@ const SidebarContent = ({ onNavigate }: { onNavigate?: () => void }) => {
   const { t } = useT();
   const location = useLocation();
   const navigate = useNavigate();
-  const role = useCurrentMembership()?.role;
-  const visible = groups
+  const membership = useCurrentMembership();
+  const role = membership?.role;
+  const superAdmin = useAuthStore((s) => s.user?.role === "SUPER_ADMIN" && !s.support);
+  const platform: typeof groups = superAdmin ? [{ label: "nav.platform", items: [{ label: "nav.platform", icon: <AdminPanelSettingsOutlined />, path: "/admin" }] }] : [];
+  const visible = [...groups, ...platform]
+    // staff limited to some buildings see no vehicles (the API hides them too)
+    .filter((g) => !(membership?.limited && g.label === "nav.fleet"))
     .map((g) => ({ ...g, items: g.items.filter((i) => !i.roles || (role && i.roles.includes(role))) }))
     .filter((g) => g.items.length);
 

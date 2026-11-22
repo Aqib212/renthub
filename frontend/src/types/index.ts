@@ -6,6 +6,8 @@ export interface User {
   lastName: string;
   /** Platform role. Business roles are per workspace, in memberships. */
   role: "SUPER_ADMIN" | "USER";
+  /** set by /auth/profile during a super-admin support view */
+  support?: boolean;
   status: "ACTIVE" | "INACTIVE" | "BLOCKED";
   emailVerified: boolean;
   avatar: string | null;
@@ -21,6 +23,8 @@ export interface Membership {
   orgId: string;
   orgName: string;
   role: OrgRole;
+  /** sees only some buildings (and no vehicles) */
+  limited?: boolean;
 }
 
 export interface OwnerProfile {
@@ -36,9 +40,9 @@ export interface OwnerProfile {
   photo: string | null;
 }
 
+/** The refresh token is an httpOnly cookie the browser keeps; only the access token reaches JS. */
 export interface AuthTokens {
   accessToken: string;
-  refreshToken: string;
 }
 
 export interface AuthResponse {

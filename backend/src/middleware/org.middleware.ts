@@ -18,22 +18,35 @@ export const requireOrg = async (req: OrgRequest, _res: Response, next: NextFunc
     const userId = toNumberId(req.user.userId);
     const header = req.header("x-org-id");
 
+    // super-admin support view: the workspace as its owner sees it, and nothing can be changed
+    if (req.user.support) {
+      if (req.method !== "GET" && req.method !== "HEAD") return next(new ForbiddenError("Support view is read-only"));
+      if (header && Number(toNumberId(header)) !== req.user.support) return next(new ForbiddenError("This support session is for another workspace"));
+      const owner = await prisma.membership.findFirst({ where: { orgId: req.user.support, role: "OWNER" }, orderBy: { createdAt: "asc" }, select: { id: true } });
+      if (!owner) return next(new ForbiddenError("This workspace has no owner"));
+      req.org = { id: req.user.support, membershipId: Number(owner.id), role: "OWNER", buildingIds: null };
+      return actorStore.run({ orgId: req.org.id, userId: Number(userId), buildingIds: null, ip: req.ip, userAgent: req.get("user-agent") }, next);
+    }
+
     const memberships = await prisma.membership.findMany({
       where: { userId, isActive: true, ...(header ? { orgId: toNumberId(header) } : {}) },
-      select: { id: true, orgId: true, role: true, buildingIds: true },
+      select: { id: true, orgId: true, role: true, buildingIds: true, org: { select: { suspendedAt: true } } },
       take: 2,
     });
     if (!memberships.length) return next(new ForbiddenError("You are not a member of this organisation"));
     if (!header && memberships.length > 1) return next(new ForbiddenError("Choose an organisation (X-Org-Id header)"));
 
     const m = memberships[0];
+    if (m.org.suspendedAt) return next(new ForbiddenError("This workspace is suspended. Contact RentHub."));
     req.org = {
       id: Number(m.orgId),
       membershipId: Number(m.id),
       role: m.role,
       buildingIds: Array.isArray(m.buildingIds) ? (m.buildingIds as unknown[]).map(Number) : null,
     };
-    actorStore.run({ orgId: req.org.id, userId: Number(userId), membershipId: req.org.membershipId, ip: req.ip, userAgent: req.get("user-agent") }, next);
+    // the owner always sees everything; other members may be limited to some buildings (shared/scope.ts)
+    const buildingIds = m.role === "OWNER" ? null : req.org.buildingIds;
+    actorStore.run({ orgId: req.org.id, userId: Number(userId), membershipId: req.org.membershipId, buildingIds, ip: req.ip, userAgent: req.get("user-agent") }, next);
   } catch (e) {
     next(e);
   }

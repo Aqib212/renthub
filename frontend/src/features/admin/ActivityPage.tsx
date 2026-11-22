@@ -19,6 +19,9 @@ const FILTERS: { value: string; label: string }[] = [
   { value: "claim", label: "Portal payments" },
   { value: "notice", label: "Move-out requests" },
   { value: "jama", label: "Jama off days" },
+  { value: "booking", label: "Bookings" },
+  { value: "admin", label: "RentHub account" },
+  { value: "support", label: "Support visits" },
 ];
 
 /** Plain-English line for an audit row; the raw metadata is shown beside it. */
@@ -53,6 +56,16 @@ const describe = (r: AuditRow) => {
     case "notice.accepted": return `Accepted the tenant's notice (leaving ${m.moveOutDate})`;
     case "notice.declined": return `Declined the tenant's notice${m.note ? `: ${m.note}` : ""}`;
     case "jama.day_set": return `${m.vehicle ?? "Vehicle"} ${m.date}: ${Number(m.amount) === 0 ? "off day" : `jama ${tk(m.amount)}`}${m.reason ? ` (${m.reason})` : ""}`;
+    case "booking.create": return `Booked ${m.vehicle} ${m.from}${m.to !== m.from ? ` to ${m.to}` : ""} at ${tk(m.dayRate)}/day`;
+    case "booking.update": return `Changed the booking of ${m.vehicle}`;
+    case "booking.start": return `${m.vehicle} left on a trip (${m.startKm} km)`;
+    case "booking.close": return `${m.vehicle} back from a trip${m.km != null ? ` (${m.km} km)` : ""}`;
+    case "booking.cancel": return `Cancelled the booking of ${m.vehicle}${m.charge ? `, charge ${tk(m.charge)}` : ""}`;
+    case "support.open": return "RentHub support opened this workspace (read-only)";
+    case "admin.plan": return `RentHub changed the plan: ${Object.entries(m.after ?? {}).map(([k, v]) => `${k} ${v ?? "none"}`).join(", ")}`;
+    case "admin.credits": return `RentHub ${Number(m.amount) > 0 ? "added" : "removed"} ${Math.abs(Number(m.amount))} SMS credits (${m.reason})`;
+    case "admin.suspend": return "RentHub suspended this workspace";
+    case "admin.reactivate": return "RentHub reactivated this workspace";
     case "jama.day_clear": return `${m.vehicle ?? "Vehicle"} ${m.date}: back to normal jama`;
     default:
       if (r.action.startsWith("maintenance.")) return `Maintenance: ${m.title ?? ""} ${r.action.split(".")[1]}${m.cost ? ` (${tk(m.cost)})` : ""}`;
@@ -65,6 +78,7 @@ const linkFor = (r: AuditRow) =>
   : r.entity === "Payment" && r.entityId && r.action !== "payment.delete" ? `/payments/${r.entityId}/receipt`
   : r.entity === "Invoice" && r.entityId && r.action !== "invoice.delete" ? `/invoices/${r.entityId}/print`
   : r.entity === "MaintenanceRequest" ? "/maintenance"
+  : r.entity === "Booking" && r.entityId ? `/bookings/${r.entityId}`
   : null;
 
 export const ActivityPage = () => {

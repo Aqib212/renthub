@@ -8,11 +8,14 @@ export const inviteMemberSchema = z.object({
   firstName: z.string().min(1).max(100),
   lastName: z.string().min(1).max(100),
   role: staffRole,
+  /** null / absent = all buildings */
+  buildingIds: z.array(z.number().int().positive()).max(200).nullable().optional(),
 });
 
 export const updateMemberSchema = z.object({
   role: staffRole.optional(),
   isActive: z.boolean().optional(),
+  buildingIds: z.array(z.number().int().positive()).max(200).nullable().optional(),
 });
 
 export const updateOrgSchema = z.object({
@@ -25,6 +28,15 @@ export const updateOrgSchema = z.object({
       agreementClauses: z.array(z.string().trim().min(1).max(1000)).max(30).optional(),
       portal: z.object({ enabled: z.boolean().optional() }).optional(),
       payInfo: z.string().max(1000).optional(),
+      lateFee: z
+        .object({
+          enabled: z.boolean().optional(),
+          afterDays: z.number().int().min(0).max(60).optional(),
+          type: z.enum(["FLAT", "PERCENT"]).optional(),
+          amount: z.number().min(0).max(100000).optional(),
+        })
+        .refine((v) => v.type !== "PERCENT" || (v.amount ?? 0) <= 50, { message: "A percentage late fee can be at most 50%", path: ["amount"] })
+        .optional(),
     })
     .optional(),
 });

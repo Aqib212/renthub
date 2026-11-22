@@ -164,7 +164,7 @@ export function PaymentFormDialog({ open, onClose, preselectedInvoiceId, presetA
               select label="Payment Method" required fullWidth value={method}
               onChange={(e) => setMethod(e.target.value as PaymentMethod)}
             >
-              {(Object.keys(METHOD_LABELS) as PaymentMethod[]).filter((m) => m !== "DEPOSIT").map((m) => (
+              {(Object.keys(METHOD_LABELS) as PaymentMethod[]).filter((m) => m !== "DEPOSIT" && m !== "ONLINE").map((m) => (
                 <MenuItem key={m} value={m}>{METHOD_LABELS[m]}</MenuItem>
               ))}
             </TextField>

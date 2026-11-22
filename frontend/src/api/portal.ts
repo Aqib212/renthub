@@ -13,10 +13,9 @@ portal.interceptors.request.use((config) => {
 let refreshing: Promise<string | null> | null = null;
 const refresh = () =>
   (refreshing ??= (async () => {
-    const rt = usePortalStore.getState().refreshToken;
-    if (!rt) return null;
+    if (!usePortalStore.getState().phone) return null;
     try {
-      const r = await axios.post("/api/v1/portal/auth/refresh", { refreshToken: rt });
+      const r = await axios.post("/api/v1/portal/auth/refresh");
       usePortalStore.getState().setSession(r.data.data);
       return r.data.data.accessToken as string;
     } catch {
@@ -76,7 +75,7 @@ export interface PortalRepair { id: number; title: string; description: string |
 
 export const portalApi = {
   requestOtp: (phone: string, lang: "BN" | "EN") => d<{ message: string }>(portal.post("/auth/request-otp", { phone, lang })),
-  verifyOtp: (phone: string, code: string) => d<{ accessToken: string; refreshToken: string; phone: string }>(portal.post("/auth/verify-otp", { phone, code })),
+  verifyOtp: (phone: string, code: string) => d<{ accessToken: string; phone: string }>(portal.post("/auth/verify-otp", { phone, code })),
   logout: () => portal.post("/auth/logout").catch(() => {}),
   home: () => d<PortalHome>(portal.get("/home")),
   invoices: (agreementId: number) => d<PortalInvoice[]>(portal.get("/invoices", { params: { agreementId } })),

@@ -1,8 +1,8 @@
 // SMS texts in Bangla and English. Pure functions: easy to test and to preview in the Messages screen.
 
 export type Lang = "BN" | "EN";
-export type TemplateKey = "RECEIPT" | "RENT_DUE" | "DUE_TODAY" | "OVERDUE" | "CLAIM_REJECTED" | "NOTICE_ACCEPTED" | "NOTICE_DECLINED" | "DOC_EXPIRY";
-export const TEMPLATE_KEYS: TemplateKey[] = ["RECEIPT", "RENT_DUE", "DUE_TODAY", "OVERDUE", "CLAIM_REJECTED", "NOTICE_ACCEPTED", "NOTICE_DECLINED", "DOC_EXPIRY"];
+export type TemplateKey = "RECEIPT" | "RENT_DUE" | "DUE_TODAY" | "OVERDUE" | "CLAIM_REJECTED" | "NOTICE_ACCEPTED" | "NOTICE_DECLINED" | "DOC_EXPIRY" | "BOOKING_CONFIRMED" | "TRIP_BILL";
+export const TEMPLATE_KEYS: TemplateKey[] = ["RECEIPT", "RENT_DUE", "DUE_TODAY", "OVERDUE", "CLAIM_REJECTED", "NOTICE_ACCEPTED", "NOTICE_DECLINED", "DOC_EXPIRY", "BOOKING_CONFIRMED", "TRIP_BILL"];
 
 export interface TemplateData {
   org: string; // landlord / organisation name
@@ -24,6 +24,9 @@ export interface TemplateData {
   expiresOn?: string;
   /** DOC_EXPIRY: 0 = today */
   daysLeft?: number;
+  /** BOOKING_CONFIRMED: first and last day of the trip "2026-12-05" (unit = the vehicle, amount = estimate) */
+  tripFrom?: string;
+  tripTo?: string;
 }
 
 const BN_DIGITS = "০১২৩৪৫৬৭৮৯";
@@ -83,6 +86,16 @@ export function render(key: TemplateKey, lang: Lang, d: TemplateData): string {
       return bn
         ? `${d.org}: ${d.unit}-এর ${d.document ?? ""}-এর মেয়াদ ${d.daysLeft ? `${dayName(d.expiresOn!, lang)} শেষ হবে (${toBnDigits(d.daysLeft)} দিন বাকি)` : "আজ শেষ"}। নবায়ন করুন।`
         : `${d.org}: ${d.document ?? ""} for ${d.unit} ${d.daysLeft ? `expires ${dayName(d.expiresOn!, lang)} (${d.daysLeft} days left)` : "expires today"}. Please renew.`;
+    case "BOOKING_CONFIRMED": {
+      const when = d.tripTo && d.tripTo !== d.tripFrom ? `${dayName(d.tripFrom!, lang)} ${bn ? "থেকে" : "to"} ${dayName(d.tripTo, lang)}` : dayName(d.tripFrom!, lang);
+      return bn
+        ? `${d.org}: ${when} ${d.unit} বুকিং নিশ্চিত। আনুমানিক ভাড়া ${taka(d.amount, lang)}${d.balance != null ? `, অগ্রিম বাদে বাকি ${taka(d.balance, lang)}` : ""}।${link(d)}`
+        : `${d.org}: booking confirmed, ${d.unit} on ${when}. Estimate ${taka(d.amount, lang)}${d.balance != null ? `, ${taka(d.balance, lang)} after the advance` : ""}.${link(d)}`;
+    }
+    case "TRIP_BILL":
+      return bn
+        ? `${d.org}: ${d.unit} ভ্রমণের বিল ${taka(d.amount, lang)}${d.balance ? `, বাকি ${taka(d.balance, lang)}` : ", পরিশোধিত"}।${link(d)}`
+        : `${d.org}: trip bill for ${d.unit}: ${taka(d.amount, lang)}${d.balance ? `, ${taka(d.balance, lang)} due` : ", paid in full"}.${link(d)}`;
   }
 }
 
@@ -111,4 +124,6 @@ export const SAMPLE: TemplateData = {
   expiresOn: "2026-12-31",
   daysLeft: 7,
   moveOutDate: "2027-01-31",
+  tripFrom: "2026-12-05",
+  tripTo: "2026-12-07",
 };

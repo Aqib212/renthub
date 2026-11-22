@@ -11,6 +11,7 @@ import { generatePortalAccessToken, verifyPortalAccessToken } from "../../shared
 import { TooManyRequestsError, UnauthorizedError, ValidationError } from "../../shared/utils/errors";
 import { asyncHandler } from "../../shared/utils/asyncHandler";
 import { sendResult } from "../../shared/utils/apiResponse";
+import { PORTAL_RT, clearRefreshCookie, readCookie, setRefreshCookie } from "../../shared/utils/cookies";
 import { validate } from "../../middleware/validate.middleware";
 import { portalAuthRateLimiter } from "../../middleware/rateLimiter.middleware";
 import { sendSms } from "../notification/sms.sender";
@@ -41,12 +42,12 @@ const phoneSchema = z.string().trim().min(6).max(20).transform((v, ctx) => {
 });
 const requestSchema = z.object({ phone: phoneSchema, lang: z.enum(["BN", "EN"]).optional() });
 const verifySchema = z.object({ phone: phoneSchema, code: z.string().trim().regex(/^\d{6}$/, "Enter the 6-digit code") });
-const refreshSchema = z.object({ refreshToken: z.string().min(20).max(200) });
 
 /** Tenants this phone may see: matching phone, in orgs that have the portal on, with a real agreement. */
 async function tenantIdsFor(phone: string) {
   const rows = await prisma.tenant.findMany({
-    where: { phoneNormalized: phone, agreements: { some: { status: { not: "DRAFT" } } } },
+    // suspended landlords are left out: their tenants can still open bill and receipt links
+    where: { phoneNormalized: phone, agreements: { some: { status: { not: "DRAFT" } } }, org: { suspendedAt: null } },
     select: { id: true, lang: true, org: { select: { settings: true } } },
   });
   return rows.filter((r) => (r.org.settings as any)?.portal?.enabled !== false);
@@ -123,18 +124,29 @@ portalAuthRouter.post("/verify-otp", validate(verifySchema), asyncHandler(async 
   // keep the rows for the hourly throttle, but burn them for login
   await prisma.portalOtp.updateMany({ where: { phone }, data: { attempts: MAX_TRIES, expiresAt: new Date() } });
   if (!(await tenantIdsFor(phone)).length) throw new UnauthorizedError("This number has no active tenancy");
-  sendResult(res, await openSession(phone, req.get("user-agent")));
+  const { refreshToken, ...session } = await openSession(phone, req.get("user-agent"));
+  setRefreshCookie(res, PORTAL_RT, refreshToken, SESSION_DAYS * 86_400_000);
+  sendResult(res, session);
 }));
 
-portalAuthRouter.post("/refresh", validate(refreshSchema), asyncHandler(async (req: Request, res: Response) => {
-  const s = await prisma.portalSession.findUnique({ where: { refreshHash: sha256(req.body.refreshToken) } });
-  if (!s || s.expiresAt < new Date()) throw new UnauthorizedError("Session ended, please log in again");
+/** The refresh token is the httpOnly cookie set at verify-otp; it rotates on every refresh. */
+portalAuthRouter.post("/refresh", asyncHandler(async (req: Request, res: Response) => {
+  const token = readCookie(req, PORTAL_RT.name);
+  const s = token ? await prisma.portalSession.findUnique({ where: { refreshHash: sha256(token) } }) : null;
+  if (!s || s.expiresAt < new Date()) {
+    clearRefreshCookie(res, PORTAL_RT);
+    throw new UnauthorizedError("Session ended, please log in again");
+  }
   const refreshToken = crypto.randomBytes(32).toString("base64url");
   await prisma.portalSession.update({ where: { id: s.id }, data: { refreshHash: sha256(refreshToken), lastSeenAt: new Date() } });
-  sendResult(res, { accessToken: generatePortalAccessToken({ phone: s.phone, sid: String(s.id) }), refreshToken, phone: s.phone });
+  setRefreshCookie(res, PORTAL_RT, refreshToken, s.expiresAt.getTime() - Date.now());
+  sendResult(res, { accessToken: generatePortalAccessToken({ phone: s.phone, sid: String(s.id) }), phone: s.phone });
 }));
 
-portalAuthRouter.post("/logout", tenantAuth, asyncHandler(async (req: PortalRequest, res: Response) => {
-  await prisma.portalSession.deleteMany({ where: { id: req.portal!.sessionId } });
+/** Ends this device's session (found by the cookie, so it works even with an expired access token). */
+portalAuthRouter.post("/logout", asyncHandler(async (req: Request, res: Response) => {
+  const token = readCookie(req, PORTAL_RT.name);
+  if (token) await prisma.portalSession.deleteMany({ where: { refreshHash: sha256(token) } });
+  clearRefreshCookie(res, PORTAL_RT);
   sendResult(res, { ok: true });
 }));

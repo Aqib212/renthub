@@ -29,7 +29,8 @@ const NAV = [
 
 /** Mobile-first shell for tenants: top bar, bottom navigation, installable as a PWA. */
 export const PortalLayout = () => {
-  const token = usePortalStore((s) => s.accessToken);
+  // logged in on this device (the access token itself is refreshed from the cookie on demand)
+  const token = usePortalStore((s) => s.phone);
   const logout = usePortalStore((s) => s.logout);
   const { t, lang } = useT();
   const setLang = useUiStore((s) => s.setLang);

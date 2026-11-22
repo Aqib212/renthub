@@ -1,5 +1,6 @@
 import { PrismaClient, Prisma } from "@prisma/client";
 import { normalizeBdPhone } from "./notify/phone";
+import { SCOPED_ACTIONS, scopeWhere } from "./scope";
 
 if (typeof BigInt !== "undefined" && !(BigInt.prototype as any).toJSON) {
   (BigInt.prototype as any).toJSON = function () {
@@ -38,6 +39,18 @@ if (!(globalForPrisma as any).phoneHook) {
       if (params.action === "upsert") { fix(a.create); fix(a.update); }
       else if (Array.isArray(a.data)) a.data.forEach(fix);
       else fix(a.data);
+    }
+    return next(params);
+  });
+}
+
+// Staff limited to some buildings (Membership.buildingIds) only ever see rows of those buildings (shared/scope.ts).
+if (!(globalForPrisma as any).scopeHook) {
+  (globalForPrisma as any).scopeHook = true;
+  prisma.$use(async (params, next) => {
+    if (SCOPED_ACTIONS.has(params.action)) {
+      const where = scopeWhere(params.model, params.args?.where);
+      if (where !== params.args?.where) params.args = { ...(params.args ?? {}), where };
     }
     return next(params);
   });

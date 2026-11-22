@@ -11,6 +11,7 @@ import { invoiceApi } from "@/api/invoice";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { GenerateSingleInvoiceDialog } from "./components/GenerateSingleInvoiceDialog";
 import { PaymentFormDialog } from "@/features/payments/components/PaymentFormDialog";
+import { WhatsAppButton } from "@/components/WhatsAppButton";
 import { MONTH_NAMES } from "@/types/invoice";
 import type { InvoiceStatus, InvoiceQueryParams } from "@/types/invoice";
 import { INVOICE_STATUS } from "@/theme";
@@ -139,6 +140,7 @@ export default function InvoiceListPage() {
                   <Tooltip title="View / print">
                     <IconButton size="small" onClick={() => navigate(`/invoices/${inv.id}/print`)}><VisibilityOutlined fontSize="small" /></IconButton>
                   </Tooltip>
+                  <WhatsAppButton icon path={`/invoices/${inv.id}/share-text`} disabled={inv.carriedForward || inv.dueAmount <= 0} />
                   <Tooltip title="Record payment">
                     <span>
                       <IconButton size="small" color="primary" disabled={inv.carriedForward || inv.dueAmount <= 0} onClick={() => setPaymentInvoiceId(inv.id)}>

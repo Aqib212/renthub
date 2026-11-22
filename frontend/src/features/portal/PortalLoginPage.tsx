@@ -14,7 +14,7 @@ export const PortalLoginPage = () => {
   const setLang = useUiStore((s) => s.setLang);
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const { accessToken, setSession } = usePortalStore();
+  const { phone: loggedIn, setSession } = usePortalStore();
   const [phone, setPhone] = useState(params.get("phone") ?? "");
   const [step, setStep] = useState<"phone" | "code">("phone");
   const [code, setCode] = useState("");
@@ -38,7 +38,7 @@ export const PortalLoginPage = () => {
     onError: (e) => setError(apiError(e)),
   });
 
-  if (accessToken) return <Navigate to="/portal" replace />;
+  if (loggedIn) return <Navigate to="/portal" replace />;
 
   return (
     <Box sx={{ minHeight: "100dvh", display: "grid", placeItems: "center", bgcolor: "background.default", px: 2 }}>

@@ -4,6 +4,7 @@ import {
 } from "@mui/material";
 import { useQuery } from "@tanstack/react-query";
 import { paymentApi } from "@/api/payment";
+import { WhatsAppButton } from "@/components/WhatsAppButton";
 import { METHOD_LABELS, METHOD_COLORS } from "@/types/payment";
 import { MONTH_NAMES } from "@/types/invoice";
 
@@ -123,6 +124,7 @@ export function PaymentDetailDialog({ open, paymentId, onClose }: Props) {
         ) : null}
       </DialogContent>
       <DialogActions>
+        {payment?.receiptNo && <WhatsAppButton path={`/payments/${payment.id}/share-text`} />}
         <Button onClick={onClose}>Close</Button>
       </DialogActions>
     </Dialog>

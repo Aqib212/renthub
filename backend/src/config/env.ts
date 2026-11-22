@@ -24,12 +24,25 @@ export const env = {
     expiresInMinutes: parseInt(process.env.OTP_EXPIRES_IN_MINUTES || "10", 10),
   },
 
+  /** How long a super-admin "open as owner" (read-only) session lasts. */
+  supportTokenTtl: process.env.SUPPORT_TOKEN_TTL || "30m",
+
   /** Public base URL of the frontend, used in SMS links (receipts, invoices). */
   appUrl: (process.env.APP_URL || "http://localhost:3000").replace(/\/$/, ""),
 
+  /** Where the payment gateway sends the browser and its IPN back to; the frontend proxies /api, so APP_URL works locally. */
+  apiPublicUrl: (process.env.API_PUBLIC_URL || process.env.APP_URL || "http://localhost:3000").replace(/\/$/, ""),
+
+  gateway: {
+    /** encrypts each workspace's SSLCommerz store password at rest (any long random string) */
+    key: process.env.GATEWAY_KEY || "",
+    /** test mode only: skip SSLCommerz and accept val_id "FAKE-<tranId>" */
+    fake: process.env.SSLCZ_FAKE === "1" && process.env.NODE_ENV !== "production",
+  },
+
   sms: {
-    /** "console" prints messages (default); "http" calls a gateway with the template URL below. */
-    driver: (process.env.SMS_DRIVER || "console") as "console" | "http",
+    /** "console" prints messages (default); "bulksmsbd" uses SMS_API_KEY + SMS_SENDER_ID; "http" calls a gateway with the template URL below. */
+    driver: (process.env.SMS_DRIVER || "console") as "console" | "http" | "bulksmsbd",
     /** e.g. https://gateway.example/api?api_key={key}&senderid={sender}&number={to}&message={text} */
     httpUrl: process.env.SMS_HTTP_URL || "",
     apiKey: process.env.SMS_API_KEY || "",
