@@ -1,137 +1,101 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
-  Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, MenuItem,
-  Stack, CircularProgress,
+  Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, InputAdornment, MenuItem, Stack, TextField,
+  Typography, useMediaQuery, useTheme,
 } from "@mui/material";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { expenseApi } from "@/api/expense";
-import { buildingApi } from "@/api/building";
-import { CATEGORY_LABELS } from "@/types/expense";
+import { EXPENSE_CATEGORIES } from "@/types/expense";
 import type { Expense, ExpenseCategory } from "@/types/expense";
+import { useT } from "@/i18n";
+import { apiError } from "@/utils/format";
+import { CategoryChip, catKey } from "./CategoryChip";
 
 interface Props {
   open: boolean;
   onClose: () => void;
   expense?: Expense | null;
+  buildings: { id: number; name: string }[];
+  onDelete?: () => void;
 }
 
-export function ExpenseFormDialog({ open, onClose, expense }: Props) {
-  const queryClient = useQueryClient();
-  const isEdit = !!expense;
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+export function ExpenseFormDialog({ open, onClose, expense, buildings, onDelete }: Props) {
+  const { t } = useT();
+  const qc = useQueryClient();
+  const phone = useMediaQuery(useTheme().breakpoints.down("sm"));
   const [category, setCategory] = useState<ExpenseCategory>("MISC");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(today());
   const [buildingId, setBuildingId] = useState<number | "">("");
 
-  const { data: buildingsData } = useQuery({
-    queryKey: ["buildings", { limit: 200 }],
-    queryFn: async () => {
-      const res = await buildingApi.getAll({ limit: 200 });
-      return res.data.data || res.data;
-    },
-    enabled: open,
-  });
-
   useEffect(() => {
-    if (open) {
-      if (expense) {
-        setCategory(expense.category);
-        setAmount(String(expense.amount));
-        setDescription(expense.description || "");
-        setDate(new Date(expense.date).toISOString().split("T")[0]);
-        setBuildingId(expense.buildingId ?? "");
-      } else {
-        setCategory("MISC");
-        setAmount("");
-        setDescription("");
-        setDate(new Date().toISOString().split("T")[0]);
-        setBuildingId("");
-      }
-    }
+    if (!open) return;
+    setCategory(expense?.category ?? "MISC");
+    setAmount(expense ? String(expense.amount) : "");
+    setDescription(expense?.description ?? "");
+    setDate(expense ? expense.date.slice(0, 10) : today());
+    setBuildingId(expense?.buildingId ?? "");
   }, [open, expense]);
 
-  const createMutation = useMutation({
-    mutationFn: () => expenseApi.create({
-      category, amount: parseFloat(amount), description: description || undefined, date, buildingId: typeof buildingId === "number" ? buildingId : undefined,
-    }),
+  const save = useMutation({
+    mutationFn: () => {
+      const body = { category, amount: parseFloat(amount), description, date, buildingId: buildingId === "" ? null : buildingId };
+      return expense ? expenseApi.update(expense.id, body) : expenseApi.create(body);
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["expenses"] });
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["expenses"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
       onClose();
     },
   });
+  useEffect(() => { if (open) save.reset(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const updateMutation = useMutation({
-    mutationFn: () => expenseApi.update(expense!.id, {
-      category, amount: parseFloat(amount), description, date, buildingId: typeof buildingId === "number" ? buildingId : undefined,
-    }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["expenses"] });
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      onClose();
-    },
-  });
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!amount || parseFloat(amount) <= 0) return;
-    if (isEdit) updateMutation.mutate();
-    else createMutation.mutate();
-  };
-
-  const isPending = createMutation.isPending || updateMutation.isPending;
+  const valid = parseFloat(amount) > 0 && !!date;
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <form onSubmit={handleSubmit}>
-        <DialogTitle>{isEdit ? "Edit Expense" : "Add Expense"}</DialogTitle>
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth fullScreen={phone}>
+      <form onSubmit={(e) => { e.preventDefault(); if (valid) save.mutate(); }}>
+        <DialogTitle>{expense ? t("exp.edit") : t("exp.add")}</DialogTitle>
         <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <TextField
-              select label="Category" required fullWidth value={category}
-              onChange={(e) => setCategory(e.target.value as ExpenseCategory)}
-            >
-              {(Object.keys(CATEGORY_LABELS) as ExpenseCategory[]).map((c) => (
-                <MenuItem key={c} value={c}>{CATEGORY_LABELS[c]}</MenuItem>
-              ))}
+          <Stack spacing={2.25} sx={{ mt: 0.5 }}>
+            {save.isError && <Alert severity="error">{apiError(save.error)}</Alert>}
+            <Box>
+              <Typography fontSize={14} fontWeight={600} sx={{ mb: 1 }}>{t("exp.whatFor")}</Typography>
+              <Stack direction="row" flexWrap="wrap" useFlexGap spacing={1}>
+                {EXPENSE_CATEGORIES.map((c) => (
+                  <CategoryChip key={c} c={c} label={t(catKey(c))} selected={category === c} onClick={() => setCategory(c)} />
+                ))}
+              </Stack>
+            </Box>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+              <TextField
+                label={t("exp.amount")} type="number" required autoFocus value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                inputProps={{ min: 0, step: "0.01" }}
+                InputProps={{ startAdornment: <InputAdornment position="start">৳</InputAdornment> }}
+              />
+              <TextField label={t("exp.date")} type="date" required InputLabelProps={{ shrink: true }} value={date} onChange={(e) => setDate(e.target.value)} />
+            </Stack>
+            <TextField select label={t("exp.building")} value={buildingId}
+              onChange={(e) => setBuildingId(e.target.value === "" ? "" : Number(e.target.value))}>
+              <MenuItem value="">{t("exp.generalAll")}</MenuItem>
+              {buildings.map((b) => <MenuItem key={b.id} value={b.id}>{b.name}</MenuItem>)}
             </TextField>
-            <TextField
-              label="Amount" type="number" required fullWidth
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              inputProps={{ min: 0, step: 0.01 }}
-            />
-            <TextField
-              label="Date" type="date" required fullWidth
-              InputLabelProps={{ shrink: true }}
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
-            <TextField
-              select label="Building" fullWidth value={buildingId}
-              onChange={(e) => setBuildingId(e.target.value === "" ? "" : Number(e.target.value))}
-            >
-              <MenuItem value="">None (General)</MenuItem>
-              {(buildingsData?.data || []).map((b: any) => (
-                <MenuItem key={b.id} value={b.id}>{b.name}</MenuItem>
-              ))}
-            </TextField>
-            <TextField
-              label="Description" fullWidth multiline rows={2}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
+            <TextField label={t("exp.note")} placeholder={t("exp.notePh")} multiline minRows={2} value={description}
+              onChange={(e) => setDescription(e.target.value)} inputProps={{ maxLength: 500 }} />
           </Stack>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button
-            type="submit" variant="contained"
-            disabled={isPending || !amount || parseFloat(amount) <= 0}
-            startIcon={isPending ? <CircularProgress size={16} /> : undefined}
-          >
-            {isPending ? "Saving..." : isEdit ? "Update" : "Create"}
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          {onDelete && <Button color="error" onClick={onDelete} sx={{ mr: "auto" }}>{t("exp.delete")}</Button>}
+          <Button onClick={onClose}>{t("exp.cancel")}</Button>
+          <Button type="submit" variant="contained" disabled={!valid || save.isPending}>
+            {save.isPending ? t("exp.saving") : t("exp.save")}
           </Button>
         </DialogActions>
       </form>

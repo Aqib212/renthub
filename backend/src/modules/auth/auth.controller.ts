@@ -5,7 +5,7 @@ import { sendSuccess } from "../../shared/utils/apiResponse";
 import type { AuthRequest } from "../../middleware/auth.middleware";
 import { env } from "../../config/env";
 import { STAFF_RT, clearRefreshCookie, durationMs, readCookie, setRefreshCookie } from "../../shared/utils/cookies";
-import { UnauthorizedError } from "../../shared/utils/errors";
+import { ForbiddenError, UnauthorizedError } from "../../shared/utils/errors";
 import { prisma } from "../../shared/prisma";
 
 /** Puts the refresh token in the httpOnly cookie and leaves only the access token in the body. */
@@ -15,6 +15,11 @@ const withCookie = <T extends { tokens: { accessToken: string; refreshToken: str
 };
 
 const authService = new AuthService();
+
+/** The super-admin support view is read-only here too (/auth is not behind requireOrg). */
+const notSupport = (req: AuthRequest) => {
+  if (req.user?.support) throw new ForbiddenError("Support view is read-only");
+};
 
 export const register = asyncHandler(async (req, res: Response) => {
   const result = await authService.register(req.body);
@@ -62,6 +67,7 @@ export const logout = asyncHandler(async (req: AuthRequest, res: Response) => {
 });
 
 export const changePassword = asyncHandler(async (req: AuthRequest, res: Response) => {
+  notSupport(req);
   await authService.changePassword(req.user!.userId, req.body);
   clearRefreshCookie(res, STAFF_RT);
   sendSuccess(res, {
@@ -118,10 +124,23 @@ export const getProfile = asyncHandler(async (req: AuthRequest, res: Response) =
 });
 
 export const updateProfile = asyncHandler(async (req: AuthRequest, res: Response) => {
+  notSupport(req);
   const user = await authService.updateProfile(req.user!.userId, req.body);
   sendSuccess(res, {
     statusCode: 200,
     message: "Profile updated successfully",
     data: user,
   });
+});
+
+export const requestEmailChange = asyncHandler(async (req: AuthRequest, res: Response) => {
+  notSupport(req);
+  const data = await authService.requestEmailChange(req.user!.userId, req.body);
+  sendSuccess(res, { statusCode: 200, message: `We sent a code to ${data.email}`, data });
+});
+
+export const confirmEmailChange = asyncHandler(async (req: AuthRequest, res: Response) => {
+  notSupport(req);
+  const user = await authService.confirmEmailChange(req.user!.userId, req.body.otp);
+  sendSuccess(res, { statusCode: 200, message: "Email changed", data: user });
 });

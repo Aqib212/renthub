@@ -12,6 +12,8 @@ import {
   verifyOtpSchema,
   resendOtpSchema,
   updateProfileSchema,
+  emailChangeSchema,
+  emailConfirmSchema,
 } from "./auth.validation";
 
 const router = Router();
@@ -30,5 +32,7 @@ router.post("/logout", authController.logout);
 router.post("/change-password", authenticate, validate(changePasswordSchema), authController.changePassword);
 router.get("/profile", authenticate, authController.getProfile);
 router.patch("/profile", authenticate, validate(updateProfileSchema), authController.updateProfile);
+router.post("/email/change", authenticate, authRateLimiter, validate(emailChangeSchema), authController.requestEmailChange);
+router.post("/email/confirm", authenticate, authRateLimiter, validate(emailConfirmSchema), authController.confirmEmailChange);
 
 export default router;

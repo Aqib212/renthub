@@ -61,12 +61,21 @@ export const resendOtpSchema = z.object({
 });
 
 export const updateProfileSchema = z.object({
-  firstName: z.string().min(1).max(100).optional(),
-  lastName: z.string().min(1).max(100).optional(),
+  firstName: z.string().trim().min(1).max(100).optional(),
+  lastName: z.string().trim().min(1).max(100).optional(),
+  // "" removes the phone
   phone: z
-    .string()
-    .regex(/^(\+?88)?01[3-9]\d{8}$/, "Invalid Bangladeshi phone number")
+    .union([z.string().trim().regex(/^(\+?88)?01[3-9]\d{8}$/, "Invalid Bangladeshi phone number"), z.literal("")])
     .optional(),
+});
+
+export const emailChangeSchema = z.object({
+  newEmail: z.string().trim().email("Invalid email").max(255),
+  password: z.string().min(1, "Password is required"),
+});
+
+export const emailConfirmSchema = z.object({
+  otp: z.string().regex(/^\d{6}$/, "Enter the 6-digit code"),
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;
@@ -76,3 +85,4 @@ export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 export type VerifyOtpInput = z.infer<typeof verifyOtpSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+export type EmailChangeInput = z.infer<typeof emailChangeSchema>;

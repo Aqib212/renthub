@@ -13,7 +13,8 @@ import {
 } from "../../shared/utils/errors";
 import { toNumberId } from "../../shared/utils/helpers";
 import { env } from "../../config/env";
-import type { RegisterInput, LoginInput, ChangePasswordInput, UpdateProfileInput } from "./auth.validation";
+import type { RegisterInput, LoginInput, ChangePasswordInput, UpdateProfileInput, EmailChangeInput } from "./auth.validation";
+import { normalizeBdPhone } from "../../shared/notify/phone";
 import type { AuthResponse, AuthTokens } from "./auth.types";
 
 const MAX_LOGIN_ATTEMPTS = 5;
@@ -369,34 +370,61 @@ export class AuthService {
   }
 
   async updateProfile(userId: string, input: UpdateProfileInput) {
-    const user = await prisma.user.findUnique({ where: { id: toNumberId(userId) } });
-    if (!user) {
-      throw new NotFoundError("User not found");
-    }
-
-    if (input.phone && input.phone !== user.phone) {
-      const phoneExists = await prisma.user.findUnique({ where: { phone: input.phone } });
-      if (phoneExists) {
-        throw new ConflictError("Phone number already in use");
+    const id = toNumberId(userId);
+    const data: { firstName?: string; lastName?: string; phone?: string | null } = {
+      ...(input.firstName !== undefined && { firstName: input.firstName }),
+      ...(input.lastName !== undefined && { lastName: input.lastName }),
+    };
+    if (input.phone !== undefined) {
+      const n = normalizeBdPhone(input.phone);
+      if (input.phone && !n) throw new ValidationError("Invalid Bangladeshi phone number");
+      // stored as 01XXXXXXXXX; older rows may hold another format of the same number
+      data.phone = n ? n.slice(2) : null;
+      if (n) {
+        const taken = await prisma.user.findFirst({ where: { id: { not: id }, phone: { in: [data.phone!, n, "+" + n] } } });
+        if (taken) throw new ConflictError("Phone number already in use");
       }
     }
-
-    const updatedUser = await prisma.user.update({
-      where: { id: toNumberId(userId) },
-      data: input,
-      select: {
-        id: true,
-        email: true,
-        phone: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        status: true,
-        emailVerified: true,
-        avatar: true,
-      },
-    });
-
-    return updatedUser;
+    await prisma.user.update({ where: { id }, data });
+    // same shape as login/profile (with memberships), so the client store keeps the workspace
+    return this.getProfile(userId);
   }
+
+  /** Step 1 of an email change: check the password, park the new address, send it a code. */
+  async requestEmailChange(userId: string, input: EmailChangeInput) {
+    const user = await prisma.user.findUnique({ where: { id: toNumberId(userId) } });
+    if (!user) throw new NotFoundError("User not found");
+    if (!(await bcrypt.compare(input.password, user.password))) throw new ValidationError("Password is incorrect");
+    const newEmail = input.newEmail.toLowerCase();
+    if (newEmail === user.email) throw new ValidationError("That is already your email");
+    if (await prisma.user.findUnique({ where: { email: newEmail } })) throw new ConflictError("Email already in use");
+    const otp = generateOtp();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { pendingEmail: newEmail, otp, otpPurpose: "EMAIL_CHANGE", otpExpiresAt: new Date(Date.now() + env.otp.expiresInMinutes * 60 * 1000) },
+    });
+    // ponytail: no email sender yet, so the code goes to the console like the other codes; guessing is bounded only by authRateLimiter + expiry
+    console.log(`[DEV] Email change code for ${newEmail}: ${otp}`);
+    return { email: newEmail };
+  }
+
+  /** Step 2: the code sent to the new address switches the login email. */
+  async confirmEmailChange(userId: string, otp: string) {
+    const user = await prisma.user.findUnique({ where: { id: toNumberId(userId) } });
+    if (!user) throw new NotFoundError("User not found");
+    if (user.otpPurpose !== "EMAIL_CHANGE" || !user.pendingEmail || !user.otp) throw new ValidationError("No email change is waiting. Start again.");
+    if (!user.otpExpiresAt || user.otpExpiresAt < new Date()) throw new ValidationError("The code has expired. Request a new one.");
+    if (user.otp !== otp) throw new ValidationError("Wrong code");
+    try {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { email: user.pendingEmail, emailVerified: true, pendingEmail: null, otp: null, otpPurpose: null, otpExpiresAt: null },
+      });
+    } catch (e: any) {
+      if (e?.code === "P2002") throw new ConflictError("Email already in use");
+      throw e;
+    }
+    return this.getProfile(userId);
+  }
+
 }

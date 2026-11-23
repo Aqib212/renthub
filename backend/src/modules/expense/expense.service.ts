@@ -60,7 +60,15 @@ export class ExpenseService {
       where.description = { contains: query.search };
     }
 
-    const [data, total] = await Promise.all([
+    // summary follows period/building/category, not the text search
+    const { description: _s, ...sumWhere } = where;
+    let prevWhere: any = null;
+    if (query.dateFrom && query.dateTo) {
+      const from = new Date(query.dateFrom), to = new Date(query.dateTo);
+      const len = to.getTime() - from.getTime() + 86_400_000;
+      prevWhere = { ...sumWhere, date: { gte: new Date(from.getTime() - len), lte: new Date(from.getTime() - 86_400_000) } };
+    }
+    const [data, total, agg, general, byCat, prev] = await Promise.all([
       prisma.expense.findMany({
         where,
         skip: (query.page - 1) * query.limit,
@@ -71,7 +79,18 @@ export class ExpenseService {
         },
       }),
       prisma.expense.count({ where }),
+      prisma.expense.aggregate({ where: sumWhere, _sum: { amount: true }, _count: true }),
+      prisma.expense.count({ where: { ...sumWhere, buildingId: null } }),
+      prisma.expense.groupBy({ by: ["category"], where: sumWhere, _sum: { amount: true }, orderBy: { _sum: { amount: "desc" } } }),
+      prevWhere ? prisma.expense.aggregate({ where: prevWhere, _sum: { amount: true } }) : null,
     ]);
+    const summary = {
+      total: toNumber(agg._sum.amount),
+      count: agg._count,
+      general,
+      byCategory: byCat.map((c) => ({ category: c.category, amount: toNumber(c._sum.amount) })),
+      previousTotal: prev ? toNumber(prev._sum.amount) : null,
+    };
 
     return {
       data: data.map(({ building, ...e }) => ({
@@ -79,7 +98,7 @@ export class ExpenseService {
         amount: toNumber(e.amount),
         buildingName: (building as any)?.name || null,
       })),
-      meta: { page: query.page, limit: query.limit, total, totalPages: Math.ceil(total / query.limit) },
+      meta: { page: query.page, limit: query.limit, total, totalPages: Math.ceil(total / query.limit), summary },
     };
   }
 

@@ -81,5 +81,7 @@ export const authApi = {
   verifyEmail: (email: string, otp: string) => api.post("/auth/verify-email", { email, otp }),
   resendOtp: (email: string) => api.post("/auth/resend-otp", { email }),
   getProfile: () => api.get("/auth/profile"),
-  updateProfile: (data: any) => api.patch("/auth/profile", data),
+  updateProfile: (data: { firstName: string; lastName: string; phone: string }) => api.patch("/auth/profile", data),
+  requestEmailChange: (data: { newEmail: string; password: string }) => api.post("/auth/email/change", data),
+  confirmEmailChange: (otp: string) => api.post("/auth/email/confirm", { otp }),
 };

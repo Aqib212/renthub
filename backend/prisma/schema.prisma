@@ -231,6 +231,8 @@ model User {
   otp                 String?    @db.VarChar(6)
   otpExpiresAt        DateTime?
   otpPurpose          String?    @db.VarChar(20)
+  /// new address waiting for its EMAIL_CHANGE code
+  pendingEmail        String?    @db.VarChar(255)
   resetToken          String?    @db.Text
   resetTokenExpiresAt DateTime?
   loginAttempts       Int        @default(0)

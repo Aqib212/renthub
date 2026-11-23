@@ -5,7 +5,7 @@ export const createExpenseSchema = z.object({
   amount: z.number().positive(),
   description: z.string().max(500).optional(),
   date: z.string().optional(),
-  buildingId: z.coerce.number().int().positive().optional(),
+  buildingId: z.coerce.number().int().positive().nullable().optional(), // null = general
 });
 
 export const updateExpenseSchema = createExpenseSchema.partial();

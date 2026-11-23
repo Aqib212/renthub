@@ -17,7 +17,7 @@ export const expenseApi = {
     amount: number;
     description?: string;
     date?: string;
-    buildingId?: number;
+    buildingId?: number | null;
   }): Promise<Expense> => {
     const { data } = await client.post("/expenses", body);
     return data.data;
@@ -28,7 +28,7 @@ export const expenseApi = {
     amount: number;
     description: string;
     date: string;
-    buildingId: number;
+    buildingId: number | null;
   }>): Promise<Expense> => {
     const { data } = await client.patch(`/expenses/${id}`, body);
     return data.data;
